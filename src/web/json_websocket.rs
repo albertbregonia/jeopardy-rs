@@ -1,34 +1,88 @@
 use std::marker::PhantomData;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
+use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum JsonWebsocketError {
-    #[error("Encountered 'None' during attempt to read next message on WebSocket")]
+pub enum JsonWebsocketError<E> {
+    #[error("No next message available on WebSocket.")]
     EndOfStream,
-    #[error("Encountered error from underlying websocket: {0}")]
-    UnderlyingWebSocketFailure(#[from] axum::Error),
-    #[error("Encountered underlying JSON serialization/deserialization error: {0}")]
-    JsonFailure(#[from] serde_json::Error)
+    #[error("Encountered an error from underlying websocket: {0}.")]
+    Underlying(E), // where E must be the underlying error type (eg. axum::Error)
+    #[error("Encountered an underlying JSON serialization/deserialization error: {0}.")]
+    Json(#[from] serde_json::Error),
+    #[error("Encountered the wrong type of WebSocket message when expecting another.")]
+    UnexpectedMsg,
 }
 
-pub struct JsonWebSocket<I, O> {
+pub struct JsonWebSocket<W, I, O>
+where 
+    W: WebSocketLike,
+    I: DeserializeOwned,
+    O: Serialize
+{
     _input_type_bound: PhantomData<I>,
     _output_type_bound: PhantomData<O>,
-    // NOTE: this is currently tied to the axum::WebSocket
-    // it should probably be a trait to decouple.
-    socket: WebSocket
+    socket: W
 }
 
-impl <I, O> JsonWebSocket<I, O>
+pub trait WebSocketLike {
+    type Error;
+    fn read_text(&mut self) -> impl Future<Output = Result<Bytes, JsonWebsocketError<Self::Error>>> + Send;
+    fn send_text(&mut self, msg: &str) -> impl Future<Output = Result<(), JsonWebsocketError<Self::Error>>>;
+    fn disconnect(self, error_msg: Option<&str>) -> impl Future<Output = Result<(), JsonWebsocketError<Self::Error>>>;
+}
+
+impl WebSocketLike for WebSocket {
+    type Error = axum::Error;
+
+    async fn read_text(&mut self) -> Result<Bytes, JsonWebsocketError<Self::Error>> {
+        let raw_msg = self
+            .next().await
+            .ok_or(JsonWebsocketError::EndOfStream)?
+            .map_err(|e| JsonWebsocketError::Underlying(e))?;
+        match raw_msg {
+            Message::Text(utf8_bytes) => Ok(utf8_bytes.into()),
+            // NOTE: ping/pongs are not implemented bc we are actively streaming data for the game
+            _ => Err(JsonWebsocketError::UnexpectedMsg) // encompasses CloseFrame
+        }
+    }
+
+    async fn send_text(&mut self, msg: &str) -> Result<(), JsonWebsocketError<Self::Error>> {
+        let msg = Message::Text(msg.into());
+        self.send(msg).await
+            .map_err(|e| JsonWebsocketError::Underlying(e))?;
+        Ok(())
+    }
+
+    async fn disconnect(mut self, error_msg: Option<&str>) -> Result<(), JsonWebsocketError<Self::Error>> {
+        if let Some(error_msg) = error_msg {
+            let close_msg = Message::Close(Some(CloseFrame {
+                code: close_code::ERROR, 
+                reason: error_msg.into()
+            }));
+            self.send(close_msg).await
+                .inspect_err(|e| tracing::error!("Failed to send close message with error. Ignoring: {e}"))
+                .map_err(|e| JsonWebsocketError::Underlying(e))?;
+        }
+        // spec-wise this should wait for the close frame response but it's fine to close() here
+        // this function consumes `self` and drops the connection either way
+        self.close().await
+            .map_err(|e| JsonWebsocketError::Underlying(e))?;
+        Ok(())
+    }
+}
+
+impl <W, I, O> JsonWebSocket<W, I, O>
 where 
-    I: Serialize + DeserializeOwned,
-    O: Serialize + DeserializeOwned {
+    W: WebSocketLike,
+    I: DeserializeOwned,
+    O: Serialize {
     
-    pub fn new(socket: WebSocket) -> Self {
+    pub fn new(socket: W) -> Self {
         Self {
             _input_type_bound: PhantomData,
             _output_type_bound: PhantomData,
@@ -36,36 +90,23 @@ where
         }
     }
 
-    pub async fn read_msg(&mut self) -> Result<I, JsonWebsocketError> {
-        let raw_msg = self.socket
-            .next().await
-            .ok_or(JsonWebsocketError::EndOfStream)??
-            .into_data();
+    pub async fn read_json(&mut self) -> Result<I, JsonWebsocketError<W::Error>> {
+        let raw_msg = self.socket.read_text().await?;
         let deserialized = serde_json::from_slice(&raw_msg)?;
         Ok(deserialized)
     }
 
-    pub async fn write_msg(&mut self, payload: &O) -> Result<(), JsonWebsocketError> {
+    pub async fn send_json(&mut self, payload: &O) -> Result<(), JsonWebsocketError<W::Error>> {
         let serialized = serde_json::to_string(payload)?;
-        let msg = Message::Text(serialized.into());
-        self.socket.send(msg).await?;
-        Ok(())
+        self.socket.send_text(&serialized).await
     }
 
-    pub async fn handle_error(mut self, error_msg: &str) -> Result<(), JsonWebsocketError> {
+    pub async fn handle_error(self, error_msg: &str) -> Result<(), JsonWebsocketError<W::Error>> {
+        // NOTE: this consumes the object (effectively dropping the underlying socket)
+        
         // whenever an error is encountered, use this function to
         // simply close the websocket with the original error msg
         tracing::error!(error_msg);
-        let close_msg = Message::Close(Some(CloseFrame {
-            code: close_code::ERROR, 
-            reason: error_msg.into()
-        }));
-        self.socket.send(close_msg).await.inspect_err(|e|
-            tracing::error!("Failed to send close message with error. Ignoring: {e}")
-        )?;
-        // spec-wise this should wait for the close frame response but it's fine to close() here
-        // this function consumes `self` and drops the connection either way
-        self.socket.close().await?;
-        Ok(())
+        self.socket.disconnect(Some(error_msg)).await
     }
 }

@@ -16,6 +16,7 @@ serde_json = "*"
 axum = { version = "*", features = ["ws"] }
 futures-util = "*"
 tower-http = { version = "*", features = ["fs"] }
+bytes = "*" # used internally by axum
 
 # logging
 tracing = "*"
