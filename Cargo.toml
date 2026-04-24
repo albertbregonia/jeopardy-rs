@@ -1,0 +1,22 @@
+[package]
+name = "jeopardy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "*", features = ["full"] }
+anyhow = "*"
+thiserror = "*"
+
+# json
+serde = { version = "*", features = ["derive", "rc"] }
+serde_json = "*"
+
+# web server
+axum = { version = "*", features = ["ws"] }
+futures-util = "*"
+tower-http = { version = "*", features = ["fs"] }
+
+# logging
+tracing = "*"
+tracing-subscriber = "*"
