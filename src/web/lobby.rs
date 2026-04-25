@@ -7,7 +7,7 @@ pub enum LobbyManagerError {
     #[error("Lobby by the name '{0}' was not found in the database")]
     LobbyNotFound(String),
     #[error("Lobby by the name '{0}' already exists in the database")]
-    LobbyAlreadyExists(String)
+    LobbyAlreadyExists(String),
 }
 
 /// LobbyManager is the high level trait defining the collection of lobbies for the server
@@ -25,11 +25,11 @@ pub trait LobbyManager {
 }
 
 pub struct Lobby {
-    name: String
+    name: String,
 }
 
 pub struct LobbyMap {
-    lobbies: HashMap<String, Lobby> // keys are lobby name, values are `Lobby` instances
+    lobbies: HashMap<String, Lobby>, // keys are lobby name, values are `Lobby` instances
 }
 
 impl LobbyManager for LobbyMap {
@@ -45,13 +45,13 @@ impl LobbyManager for LobbyMap {
             return Err(LobbyManagerError::LobbyAlreadyExists(name));
         }
         lobby.name = name.clone();
-        self.lobbies
-            .insert(name.clone(), lobby);
+        self.lobbies.insert(name.clone(), lobby);
         self.get(&name)
     }
 
     fn remove(&mut self, name: &str) -> Result<Lobby, LobbyManagerError> {
-        let lobby = self.lobbies
+        let lobby = self
+            .lobbies
             .remove(name)
             .ok_or(LobbyManagerError::LobbyNotFound(name.to_string()))?;
         Ok(lobby)
@@ -61,13 +61,12 @@ impl LobbyManager for LobbyMap {
 impl LobbyMap {
     pub fn new() -> Self {
         Self {
-            lobbies: HashMap::new()
+            lobbies: HashMap::new(),
         }
     }
 
     pub fn sanitize_lobby_name(name: String) -> String {
-        name
-            .chars()
+        name.chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
             .map(|c| c.to_ascii_lowercase())
             .collect()

@@ -19,21 +19,29 @@ pub enum JsonWebsocketError<E> {
 }
 
 pub struct JsonWebSocket<W, I, O>
-where 
+where
     W: WebSocketLike,
     I: DeserializeOwned,
-    O: Serialize
+    O: Serialize,
 {
     _input_type_bound: PhantomData<I>,
     _output_type_bound: PhantomData<O>,
-    socket: W
+    socket: W,
 }
 
 pub trait WebSocketLike {
     type Error;
-    fn read_text(&mut self) -> impl Future<Output = Result<Bytes, JsonWebsocketError<Self::Error>>> + Send;
-    fn send_text(&mut self, msg: &str) -> impl Future<Output = Result<(), JsonWebsocketError<Self::Error>>>;
-    fn disconnect(self, error_msg: Option<&str>) -> impl Future<Output = Result<(), JsonWebsocketError<Self::Error>>>;
+    fn read_text(
+        &mut self,
+    ) -> impl Future<Output = Result<Bytes, JsonWebsocketError<Self::Error>>> + Send;
+    fn send_text(
+        &mut self,
+        msg: &str,
+    ) -> impl Future<Output = Result<(), JsonWebsocketError<Self::Error>>>;
+    fn disconnect(
+        self,
+        error_msg: Option<&str>,
+    ) -> impl Future<Output = Result<(), JsonWebsocketError<Self::Error>>>;
 }
 
 impl WebSocketLike for WebSocket {
@@ -41,52 +49,61 @@ impl WebSocketLike for WebSocket {
 
     async fn read_text(&mut self) -> Result<Bytes, JsonWebsocketError<Self::Error>> {
         let raw_msg = self
-            .next().await
+            .next()
+            .await
             .ok_or(JsonWebsocketError::EndOfStream)?
             .map_err(|e| JsonWebsocketError::Underlying(e))?;
         match raw_msg {
             Message::Text(utf8_bytes) => Ok(utf8_bytes.into()),
             // NOTE: ping/pongs are not implemented bc we are actively streaming data for the game
-            _ => Err(JsonWebsocketError::UnexpectedMsg) // encompasses CloseFrame
+            _ => Err(JsonWebsocketError::UnexpectedMsg), // encompasses CloseFrame
         }
     }
 
     async fn send_text(&mut self, msg: &str) -> Result<(), JsonWebsocketError<Self::Error>> {
         let msg = Message::Text(msg.into());
-        self.send(msg).await
+        self.send(msg)
+            .await
             .map_err(|e| JsonWebsocketError::Underlying(e))?;
         Ok(())
     }
 
-    async fn disconnect(mut self, error_msg: Option<&str>) -> Result<(), JsonWebsocketError<Self::Error>> {
+    async fn disconnect(
+        mut self,
+        error_msg: Option<&str>,
+    ) -> Result<(), JsonWebsocketError<Self::Error>> {
         if let Some(error_msg) = error_msg {
             let close_msg = Message::Close(Some(CloseFrame {
-                code: close_code::ERROR, 
-                reason: error_msg.into()
+                code: close_code::ERROR,
+                reason: error_msg.into(),
             }));
-            self.send(close_msg).await
-                .inspect_err(|e| tracing::error!("Failed to send close message with error. Ignoring: {e}"))
+            self.send(close_msg)
+                .await
+                .inspect_err(|e| {
+                    tracing::error!("Failed to send close message with error. Ignoring: {e}")
+                })
                 .map_err(|e| JsonWebsocketError::Underlying(e))?;
         }
         // spec-wise this should wait for the close frame response but it's fine to close() here
         // this function consumes `self` and drops the connection either way
-        self.close().await
+        self.close()
+            .await
             .map_err(|e| JsonWebsocketError::Underlying(e))?;
         Ok(())
     }
 }
 
-impl <W, I, O> JsonWebSocket<W, I, O>
-where 
+impl<W, I, O> JsonWebSocket<W, I, O>
+where
     W: WebSocketLike,
     I: DeserializeOwned,
-    O: Serialize {
-    
+    O: Serialize,
+{
     pub fn new(socket: W) -> Self {
         Self {
             _input_type_bound: PhantomData,
             _output_type_bound: PhantomData,
-            socket
+            socket,
         }
     }
 
@@ -103,7 +120,7 @@ where
 
     pub async fn handle_error(self, error_msg: &str) -> Result<(), JsonWebsocketError<W::Error>> {
         // NOTE: this consumes the object (effectively dropping the underlying socket)
-        
+
         // whenever an error is encountered, use this function to
         // simply close the websocket with the original error msg
         tracing::error!(error_msg);
