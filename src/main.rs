@@ -15,38 +15,18 @@ pub mod game;
 pub use game::*;
 
 use crate::{
+    global::{GlobalState, JeopardyGlobalState},
     routes::{ADMIN_API_PATH, LOGIN_PATH},
-    web::{
-        json_websocket::JsonWebSocket,
-        lobby::{LobbyManager, LobbyMap},
-    },
+    web::json_websocket::JsonWebSocket,
 };
 
-pub struct GlobalState<M: LobbyManager> {
-    manager: M,
-}
-
-// ngl I don't like this...
-// in the way that, now, the type has to be specified
-// wherever in use as opposed to being abstracted fully
-// ie. if I use something else other than LobbyMap I have to fix the specifier
-// nbd... but it is annoying
-// and I can't use a Box<dyn> bc it violates the 'static constraint
-impl<M> GlobalState<M>
-where
-    M: LobbyManager,
-{
-    pub fn new(manager: M) -> Self {
-        Self { manager }
-    }
-}
+mod global;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let lobby_map = LobbyMap::new();
-    let global_state = Arc::new(RwLock::new(GlobalState::new(lobby_map)));
+    let global_state = Arc::new(RwLock::new(GlobalState::new()));
     let static_dir = env::var(STATIC_DIR_ENV_KEY).unwrap_or(DEFAULT_STATIC_DIR.to_string());
 
     let app = Router::new()
@@ -74,7 +54,7 @@ async fn main() {
 }
 
 pub async fn websocket_upgrader(
-    State(global_state): State<Arc<RwLock<GlobalState<LobbyMap>>>>,
+    State(global_state): State<JeopardyGlobalState>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     // NOTE: a websocket is needed for players bc a live connection is needed for
@@ -82,10 +62,7 @@ pub async fn websocket_upgrader(
     ws.on_upgrade(|socket| websocket_handler(socket, global_state))
 }
 
-pub async fn websocket_handler(
-    socket: WebSocket,
-    global_state: Arc<RwLock<GlobalState<LobbyMap>>>,
-) {
+pub async fn websocket_handler(socket: WebSocket, global_state: JeopardyGlobalState) {
     // TODO:
     // 1. create websocket
     // 2. receive/validate player and lobby info
@@ -95,7 +72,7 @@ pub async fn websocket_handler(
 }
 
 async fn admin_handler(
-    State(global_state): State<Arc<RwLock<GlobalState<LobbyMap>>>>,
+    State(global_state): State<JeopardyGlobalState>,
     Json(request): Json<HostRequest>,
 ) -> impl IntoResponse {
     // TODO: handle admin API - host of the game and will control points, questions, etc.

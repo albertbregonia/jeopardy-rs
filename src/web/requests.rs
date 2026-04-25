@@ -4,4 +4,7 @@ use serde::{Deserialize, Serialize};
 pub enum PlayerRequest {}
 
 #[derive(Serialize, Deserialize)]
+pub enum PlayerResponse {}
+
+#[derive(Serialize, Deserialize)]
 pub enum HostRequest {}

@@ -1,8 +1,8 @@
 pub mod requests;
 pub use requests::*;
 
+pub mod game;
 pub mod json_websocket;
-pub mod lobby;
 pub mod routes;
 
 pub const SERVER_PORT_ENV_KEY: &'static str = "PORT";

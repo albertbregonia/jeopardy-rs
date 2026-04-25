@@ -1,5 +1,6 @@
+use super::lobby::Lobby;
+use serde::Serialize;
 use std::collections::HashMap;
-
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -13,43 +14,37 @@ pub enum LobbyManagerError {
 /// LobbyManager is the high level trait defining the collection of lobbies for the server
 /// For now, it is mostly for decoupling because we are only going to implement this with a `LobbyMap`
 /// but this is a nice abstraction for a real database with real API calls later on if we so choose.
-pub trait LobbyManager {
+pub trait LobbyManager<T: Serialize> {
     /// returns a reference to a lobby in the collection given the name
-    fn get(&self, name: &str) -> Result<&Lobby, LobbyManagerError>;
+    fn get(&self, name: &str) -> Result<&Lobby<T>, LobbyManagerError>;
 
     /// adds a new lobby to the collection returning the reference
-    fn add(&mut self, lobby: Lobby) -> Result<&Lobby, LobbyManagerError>;
+    fn add(&mut self, lobby: Lobby<T>) -> Result<&Lobby<T>, LobbyManagerError>;
 
     /// removes lobby from the collection and returns the owned instance
-    fn remove(&mut self, name: &str) -> Result<Lobby, LobbyManagerError>;
+    fn remove(&mut self, name: &str) -> Result<Lobby<T>, LobbyManagerError>;
 }
 
-pub struct Lobby {
-    name: String,
-}
-
-pub struct LobbyMap {
-    lobbies: HashMap<String, Lobby>, // keys are lobby name, values are `Lobby` instances
-}
-
-impl LobbyManager for LobbyMap {
-    fn get(&self, name: &str) -> Result<&Lobby, LobbyManagerError> {
+impl<T> LobbyManager<T> for LobbyMap<T>
+where
+    T: Serialize,
+{
+    fn get(&self, name: &str) -> Result<&Lobby<T>, LobbyManagerError> {
         self.lobbies
             .get(name)
             .ok_or(LobbyManagerError::LobbyNotFound(name.to_string()))
     }
 
-    fn add(&mut self, mut lobby: Lobby) -> Result<&Lobby, LobbyManagerError> {
-        let name = LobbyMap::sanitize_lobby_name(lobby.name);
+    fn add(&mut self, lobby: Lobby<T>) -> Result<&Lobby<T>, LobbyManagerError> {
+        let name = lobby.get_name().to_string();
         if self.lobbies.contains_key(&name) {
             return Err(LobbyManagerError::LobbyAlreadyExists(name));
         }
-        lobby.name = name.clone();
         self.lobbies.insert(name.clone(), lobby);
         self.get(&name)
     }
 
-    fn remove(&mut self, name: &str) -> Result<Lobby, LobbyManagerError> {
+    fn remove(&mut self, name: &str) -> Result<Lobby<T>, LobbyManagerError> {
         let lobby = self
             .lobbies
             .remove(name)
@@ -58,17 +53,17 @@ impl LobbyManager for LobbyMap {
     }
 }
 
-impl LobbyMap {
+pub struct LobbyMap<T: Serialize> {
+    lobbies: HashMap<String, Lobby<T>>, // keys are lobby name, values are `Lobby` instances
+}
+
+impl<T> LobbyMap<T>
+where
+    T: Serialize,
+{
     pub fn new() -> Self {
         Self {
             lobbies: HashMap::new(),
         }
-    }
-
-    pub fn sanitize_lobby_name(name: String) -> String {
-        name.chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
-            .map(|c| c.to_ascii_lowercase())
-            .collect()
     }
 }
