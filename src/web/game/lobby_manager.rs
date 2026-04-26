@@ -15,6 +15,9 @@ pub enum LobbyManagerError {
 /// For now, it is mostly for decoupling because we are only going to implement this with a `LobbyMap`
 /// but this is a nice abstraction for a real database with real API calls later on if we so choose.
 pub trait LobbyManager<T: Serialize> {
+    /// returns a mutable reference to a lobby in the collection given the name
+    fn get_mut(&mut self, name: &str) -> Result<&mut Lobby<T>, LobbyManagerError>;
+
     /// returns a reference to a lobby in the collection given the name
     fn get(&self, name: &str) -> Result<&Lobby<T>, LobbyManagerError>;
 
@@ -29,6 +32,12 @@ impl<T> LobbyManager<T> for LobbyMap<T>
 where
     T: Serialize,
 {
+    fn get_mut(&mut self, name: &str) -> Result<&mut Lobby<T>, LobbyManagerError> {
+        self.lobbies
+            .get_mut(name)
+            .ok_or(LobbyManagerError::LobbyNotFound(name.to_string()))
+    }
+
     fn get(&self, name: &str) -> Result<&Lobby<T>, LobbyManagerError> {
         self.lobbies
             .get(name)

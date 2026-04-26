@@ -1,12 +1,7 @@
 use std::{env, sync::Arc};
 
 pub mod web;
-use axum::{
-    Json, Router,
-    extract::{State, WebSocketUpgrade, ws::WebSocket},
-    response::IntoResponse,
-    routing::{get, post},
-};
+use axum::Router;
 use tokio::{net::TcpListener, sync::RwLock};
 use tower_http::services::ServeDir;
 pub use web::*;
@@ -14,11 +9,7 @@ pub use web::*;
 pub mod game;
 pub use game::*;
 
-use crate::{
-    global::{GlobalState, JeopardyGlobalState},
-    routes::{ADMIN_API_PATH, LOGIN_PATH},
-    web::json_websocket::JsonWebSocket,
-};
+use crate::global::GlobalState;
 
 mod global;
 
@@ -30,8 +21,8 @@ async fn main() {
     let static_dir = env::var(STATIC_DIR_ENV_KEY).unwrap_or(DEFAULT_STATIC_DIR.to_string());
 
     let app = Router::new()
-        .route(LOGIN_PATH, get(websocket_upgrader))
-        .route(ADMIN_API_PATH, post(admin_handler))
+        .merge(routes::player::routes())
+        .merge(routes::host::routes())
         .with_state(global_state)
         .fallback_service(ServeDir::new(static_dir));
 
@@ -51,31 +42,4 @@ async fn main() {
     axum::serve(listener, app)
         .await
         .expect("Failed to start axum server");
-}
-
-pub async fn websocket_upgrader(
-    State(global_state): State<JeopardyGlobalState>,
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    // NOTE: a websocket is needed for players bc a live connection is needed for
-    // bidirectional input (buzzer, live game state, etc.)
-    ws.on_upgrade(|socket| websocket_handler(socket, global_state))
-}
-
-pub async fn websocket_handler(socket: WebSocket, global_state: JeopardyGlobalState) {
-    // TODO:
-    // 1. create websocket
-    // 2. receive/validate player and lobby info
-    // 3. use connection for lobby/game events
-
-    // let json_ws = JsonWebSocket::new(socket);
-}
-
-async fn admin_handler(
-    State(global_state): State<JeopardyGlobalState>,
-    Json(request): Json<HostRequest>,
-) -> impl IntoResponse {
-    // TODO: handle admin API - host of the game and will control points, questions, etc.
-    // 1. prereq: establish the model / object shapes (request format, response format, etc)
-    // 2. authN only, no authZ, HTTP only bc requests are infrequent
 }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::{
-    PlayerResponse,
+    PlayerRequest, PlayerResponse,
     web::game::{LobbyManager, LobbyMap},
 };
 
@@ -11,7 +11,11 @@ use crate::{
 // current implementation of the jeopardy webserver uses:
 // - LobbyMap as the LobbyManager
 // - PlayerResponse as the output type that interfaces with the frontend
-type ResponseType = PlayerResponse;
+
+// type aliases so that if this signature changes, it will be propagated everywhere
+pub type RequestType = PlayerRequest;
+pub type ResponseType = PlayerResponse;
+pub type JeopardyGlobalState = Arc<RwLock<GlobalState<LobbyMap<ResponseType>>>>;
 
 pub struct GlobalState<M: LobbyManager<ResponseType>> {
     manager: M,
@@ -29,6 +33,12 @@ impl GlobalState<LobbyMap<ResponseType>> {
             manager: LobbyMap::new(),
         }
     }
-}
 
-pub type JeopardyGlobalState = Arc<RwLock<GlobalState<LobbyMap<ResponseType>>>>;
+    pub fn get_manager(&self) -> &LobbyMap<ResponseType> {
+        &self.manager
+    }
+
+    pub fn get_mut_manager(&mut self) -> &mut LobbyMap<ResponseType> {
+        &mut self.manager
+    }
+}

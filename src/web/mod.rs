@@ -2,6 +2,7 @@ pub mod requests;
 pub use requests::*;
 
 pub mod game;
+pub mod handlers;
 pub mod json_websocket;
 pub mod routes;
 
