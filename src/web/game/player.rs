@@ -8,10 +8,22 @@ use tokio::sync::mpsc::{Sender, error::SendError};
 
 #[derive(Debug, Error)]
 pub enum PlayerManagementError<T> {
-    #[error("Failed to send back to Player over tokio channel: {0}")]
-    Send(#[from] SendError<T>),
+    #[error("{0}")]
+    User(#[from] UserError),
+    #[error("{0}")]
+    Internal(#[from] InternalError<T>),
+}
+
+#[derive(Debug, Error)]
+pub enum UserError {
     #[error("Wager value of {0} is invalid. It must be between 0 and {1}")]
     InvalidWager(i32, i32),
+}
+
+#[derive(Debug, Error)]
+pub enum InternalError<T> {
+    #[error("Failed to send back to Player over tokio channel: {0}")]
+    Send(#[from] SendError<T>),
 }
 
 pub struct Player<T: Serialize> {
@@ -50,7 +62,10 @@ where
 
     pub fn set_wager(&mut self, wager: i32) -> Result<(), PlayerManagementError<T>> {
         if wager as i32 > self.points || wager < 0 {
-            return Err(PlayerManagementError::InvalidWager(wager, self.points));
+            return Err(PlayerManagementError::User(UserError::InvalidWager(
+                wager,
+                self.points,
+            )));
         }
         self.wager = wager as i32;
         Ok(())
@@ -82,7 +97,7 @@ where
         self.channel
             .send(payload)
             .await
-            .map_err(|e| PlayerManagementError::Send(e))?;
+            .map_err(|e| PlayerManagementError::Internal(InternalError::Send(e)))?;
         Ok(())
     }
 }

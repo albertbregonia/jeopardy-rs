@@ -12,33 +12,28 @@ use crate::{
 // - LobbyMap as the LobbyManager
 // - PlayerResponse as the output type that interfaces with the frontend
 
-// type aliases so that if this signature changes, it will be propagated everywhere
+// type aliases so that if these signatures change, it will be propagated everywhere
 pub type RequestType = PlayerRequest;
 pub type ResponseType = PlayerResponse;
-pub type JeopardyGlobalState = Arc<RwLock<GlobalState<LobbyMap<ResponseType>>>>;
+pub type JeopardyGlobalState = Arc<RwLock<GlobalState>>;
+type Manager = dyn LobbyManager<ResponseType> + Send + Sync;
 
-pub struct GlobalState<M: LobbyManager<ResponseType>> {
-    manager: M,
+pub struct GlobalState {
+    manager: Box<Manager>,
 }
 
-// ngl I don't like this...
-// in the way that, now, the type has to be specified
-// wherever in use as opposed to being abstracted fully
-// ie. if I use something else other than LobbyMap I have to fix the specifier
-// nbd... but it is annoying
-// and I can't use a Box<dyn> bc it violates the 'static constraint
-impl GlobalState<LobbyMap<ResponseType>> {
+impl GlobalState {
     pub fn new() -> Self {
         Self {
-            manager: LobbyMap::new(),
+            manager: Box::new(LobbyMap::new()),
         }
     }
 
-    pub fn get_manager(&self) -> &LobbyMap<ResponseType> {
+    pub fn get_manager(&self) -> &Box<Manager> {
         &self.manager
     }
 
-    pub fn get_mut_manager(&mut self) -> &mut LobbyMap<ResponseType> {
+    pub fn get_mut_manager(&mut self) -> &mut Box<Manager> {
         &mut self.manager
     }
 }

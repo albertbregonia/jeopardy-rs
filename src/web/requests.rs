@@ -8,6 +8,10 @@ pub enum PlayerRequest {
         password: String,
     },
     Buzzer,
+    CreateLobby {
+        lobby_name: String,
+        password: String,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
