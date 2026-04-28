@@ -19,6 +19,14 @@ where
 | `PORT` | the tcp listener port to be used by the web server (axum) | 1-65535 |
 | `STATIC_DIR` | directory for the static assets of the web frontend (html/css/js) | absolute or relative path (format is OS dependent) |
 
+# testing
+
+`cargo tarpaulin` was used to see unit test coverage
+```bash
+cargo install cargo-tarpaulin
+cargo tarpaulin
+```
+
 # features
 
 ## current

@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 use thiserror::Error;
 
 use super::player::Player;
@@ -23,7 +23,8 @@ pub enum UserError {
 #[derive(Debug, Error)]
 pub enum InternalError {}
 
-pub struct Lobby<T: Serialize> {
+#[derive(Clone)]
+pub struct Lobby<T: Serialize + Debug> {
     name: String,
     password: String,
     players: HashMap<String, Player<T>>,
@@ -31,11 +32,11 @@ pub struct Lobby<T: Serialize> {
 
 impl<T> Lobby<T>
 where
-    T: Serialize,
+    T: Serialize + Debug,
 {
     pub fn new(name: String, password: String) -> Self {
         Self {
-            name: sanitize_name(&name),
+            name,
             password,
             players: HashMap::new(),
         }
@@ -57,6 +58,12 @@ where
             .ok_or(LobbyError::User(UserError::UserNotFound(name.to_string())))
     }
 
+    pub fn get_mut_player(&mut self, name: &str) -> Result<&mut Player<T>, LobbyError> {
+        self.players
+            .get_mut(name)
+            .ok_or(LobbyError::User(UserError::UserNotFound(name.to_string())))
+    }
+
     pub fn add_player(&mut self, p: Player<T>) -> Result<(), LobbyError> {
         let name = p.get_name();
         if self.players.contains_key(name) {
@@ -73,16 +80,138 @@ where
     }
 }
 
-// lobby name must be all lowercase alphanumeric (including underscore)
-// remove all other characters otherwise.
-pub fn sanitize_name(name: &str) -> String {
-    name.chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
-        .map(|c| c.to_ascii_lowercase())
-        .collect()
-}
+#[cfg(test)]
+#[allow(non_snake_case)]
+mod lobby_tests {
+    use std::fmt::Debug;
 
-pub fn is_valid_lobby_name(name: &str) -> bool {
-    name.chars()
-        .all(|c| c.is_ascii_alphanumeric() && c.is_ascii_lowercase() || c == '_')
+    use tokio::sync::mpsc;
+
+    use crate::web::game::player::Player;
+
+    use super::*;
+
+    const TEST_LOBBY_NAME: &str = "test_lobby";
+    const TEST_LOBBY_PASSWORD: &str = "test_password";
+    const TEST_PLAYER_NAME: &str = "test_player";
+    const TEST_PLAYER_INPUT: &str = "test_input";
+    const TEST_PLAYER_POINTS: i32 = 100;
+    const TEST_PLAYER_WAGER: i32 = 100;
+
+    fn create_test_player<T: Serialize + Debug>(name: &str) -> Player<T> {
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut p = Player::new(name.to_string(), sender);
+        p.set_input(TEST_PLAYER_INPUT.to_string()).unwrap();
+        p.set_points(TEST_PLAYER_POINTS).unwrap();
+        p.set_wager(TEST_PLAYER_WAGER).unwrap();
+        p
+    }
+
+    #[test]
+    fn GIVEN_empty_lobby_WHEN_add_player_THEN_ok() {
+        // GIVEN
+        let mut lobby =
+            Lobby::<u8>::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_PASSWORD.to_string());
+        // WHEN
+        lobby
+            .add_player(create_test_player(TEST_PLAYER_NAME))
+            .unwrap();
+        // THEN
+        // NOTE: there is no get_player positive test bc it would be identical to this test.
+        let player = lobby.get_player(TEST_PLAYER_NAME).unwrap();
+        assert_eq!(player.get_name(), TEST_PLAYER_NAME);
+        assert_eq!(player.get_input(), TEST_PLAYER_INPUT);
+        assert_eq!(player.get_points(), TEST_PLAYER_POINTS);
+        assert_eq!(player.get_wager(), TEST_PLAYER_WAGER);
+    }
+
+    #[test]
+    fn GIVEN_lobby_with_conflicting_player_name_WHEN_add_player_THEN_err() {
+        // GIVEN
+        let mut lobby =
+            Lobby::<u8>::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_PASSWORD.to_string());
+        lobby
+            .add_player(create_test_player(TEST_PLAYER_NAME))
+            .unwrap();
+        // WHEN
+        let result = lobby.add_player(create_test_player(TEST_PLAYER_NAME));
+        // THEN
+        assert!(matches!(
+            result,
+            Err(LobbyError::User(UserError::UsernameTaken(name))) if name == TEST_PLAYER_NAME
+        ));
+    }
+
+    #[test]
+    fn GIVEN_empty_lobby_WHEN_get_player_THEN_err() {
+        // GIVEN
+        let lobby = Lobby::<u8>::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_PASSWORD.to_string());
+        // WHEN
+        let result = lobby.get_player(TEST_PLAYER_NAME);
+        // THEN
+        assert!(matches!(
+            result,
+            Err(LobbyError::User(UserError::UserNotFound(name))) if name == TEST_PLAYER_NAME
+        ));
+    }
+
+    #[test]
+    fn GIVEN_empty_lobby_WHEN_get_mut_player_THEN_err() {
+        // GIVEN
+        let mut lobby =
+            Lobby::<u8>::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_PASSWORD.to_string());
+        // WHEN
+        let result = lobby.get_mut_player(TEST_PLAYER_NAME);
+        // THEN
+        assert!(matches!(
+            result,
+            Err(LobbyError::User(UserError::UserNotFound(name))) if name == TEST_PLAYER_NAME
+        ));
+    }
+
+    #[test]
+    fn GIVEN_lobby_WHEN_get_mut_player_THEN_ok() {
+        // GIVEN
+        let mut lobby =
+            Lobby::<u8>::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_PASSWORD.to_string());
+        lobby
+            .add_player(create_test_player(TEST_PLAYER_NAME))
+            .unwrap();
+        // WHEN
+        let player = lobby.get_mut_player(TEST_PLAYER_NAME).unwrap();
+        // THEN
+        assert_eq!(player.get_name(), TEST_PLAYER_NAME);
+        player.set_input(String::new()).unwrap(); // this line will not compile if not mut
+    }
+
+    #[test]
+    fn GIVEN_empty_lobby_WHEN_remove_player_THEN_err() {
+        // GIVEN
+        let mut lobby =
+            Lobby::<u8>::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_PASSWORD.to_string());
+        // WHEN
+        let result = lobby.remove_player(TEST_PLAYER_NAME);
+        // THEN
+        assert!(matches!(
+            result,
+            Err(LobbyError::User(UserError::UserNotFound(name))) if name == TEST_PLAYER_NAME
+        ));
+    }
+
+    #[test]
+    fn GIVEN_lobby_WHEN_remove_player_THEN_ok() {
+        // GIVEN
+        let mut lobby =
+            Lobby::<u8>::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_PASSWORD.to_string());
+        lobby
+            .add_player(create_test_player(TEST_PLAYER_NAME))
+            .unwrap();
+        // WHEN
+        let player = lobby.remove_player(TEST_PLAYER_NAME).unwrap();
+        // THEN
+        assert_eq!(player.get_name(), TEST_PLAYER_NAME);
+        assert_eq!(player.get_input(), TEST_PLAYER_INPUT);
+        assert_eq!(player.get_points(), TEST_PLAYER_POINTS);
+        assert_eq!(player.get_wager(), TEST_PLAYER_WAGER);
+    }
 }

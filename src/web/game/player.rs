@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, error::SendError};
@@ -7,7 +9,7 @@ use tokio::sync::mpsc::{Sender, error::SendError};
 // to send to the player frontend
 
 #[derive(Debug, Error)]
-pub enum PlayerManagementError<T> {
+pub enum PlayerError<T> {
     #[error("{0}")]
     User(#[from] UserError),
     #[error("{0}")]
@@ -26,7 +28,8 @@ pub enum InternalError<T> {
     Send(#[from] SendError<T>),
 }
 
-pub struct Player<T: Serialize> {
+#[derive(Clone)]
+pub struct Player<T: Serialize + Debug> {
     name: String,       // immutable
     channel: Sender<T>, // hook to the original websocket
     points: i32,        // can go negative
@@ -36,7 +39,7 @@ pub struct Player<T: Serialize> {
 
 impl<T> Player<T>
 where
-    T: Serialize,
+    T: Serialize + Debug,
 {
     pub fn new(name: String, channel: Sender<T>) -> Self {
         Self {
@@ -44,7 +47,7 @@ where
             channel,
             points: 0,
             wager: 0,
-            input: "No answer".to_string(),
+            input: String::new(),
         }
     }
 
@@ -60,9 +63,9 @@ where
         self.wager
     }
 
-    pub fn set_wager(&mut self, wager: i32) -> Result<(), PlayerManagementError<T>> {
+    pub fn set_wager(&mut self, wager: i32) -> Result<(), PlayerError<T>> {
         if wager as i32 > self.points || wager < 0 {
-            return Err(PlayerManagementError::User(UserError::InvalidWager(
+            return Err(PlayerError::User(UserError::InvalidWager(
                 wager,
                 self.points,
             )));
@@ -75,29 +78,64 @@ where
         &self.input
     }
 
-    pub fn set_input(&mut self, input: String) -> Result<(), PlayerManagementError<T>> {
+    pub fn set_input(&mut self, input: String) -> Result<(), PlayerError<T>> {
         // TODO: validation
         self.input = input;
         Ok(())
     }
 
-    pub fn set_points(&mut self, points: i32) -> Result<(), PlayerManagementError<T>> {
+    pub fn set_points(&mut self, points: i32) -> Result<(), PlayerError<T>> {
         // TODO: validation
         self.points = points;
         Ok(())
     }
 
-    pub fn update_points(&mut self, delta: i32) -> Result<i32, PlayerManagementError<T>> {
+    pub fn update_points(&mut self, delta: i32) -> Result<i32, PlayerError<T>> {
         // TODO: validation
         self.points += delta;
         Ok(self.points)
     }
 
-    pub async fn send(&mut self, payload: T) -> Result<(), PlayerManagementError<T>> {
+    pub async fn send(&mut self, payload: T) -> Result<(), PlayerError<T>> {
         self.channel
             .send(payload)
             .await
-            .map_err(|e| PlayerManagementError::Internal(InternalError::Send(e)))?;
+            .map_err(|e| PlayerError::Internal(InternalError::Send(e)))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(non_snake_case)]
+mod player_tests {
+    use tokio::sync::mpsc;
+
+    use super::*;
+
+    const TEST_PLAYER_NAME: &str = "player";
+
+    #[test]
+    fn GIVEN_invalid_wager_WHEN_set_wager_THEN_err() {
+        // GIVEN
+        let (sender, _receiver) = mpsc::channel::<u8>(1);
+        let mut player = Player::new(TEST_PLAYER_NAME.to_string(), sender);
+        player.points = 100;
+        // WHEN
+        let negative_wager = -1;
+        let negative_wager_result = player.set_wager(negative_wager);
+        // THEN
+        assert!(matches!(
+            negative_wager_result,
+            Err(PlayerError::User(UserError::InvalidWager(wager, points))) if wager == negative_wager && points == player.points
+        ));
+
+        // WHEN
+        let wager_more_than_owned = player.points + 1;
+        let wager_more_than_owned_result = player.set_wager(wager_more_than_owned);
+        // THEN
+        assert!(matches!(
+            wager_more_than_owned_result,
+            Err(PlayerError::User(UserError::InvalidWager(wager, points))) if wager == wager_more_than_owned && points == player.points
+        ));
     }
 }

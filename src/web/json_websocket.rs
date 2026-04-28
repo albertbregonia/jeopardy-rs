@@ -140,3 +140,8 @@ where
         self.socket.disconnect(user_error, msg).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+}

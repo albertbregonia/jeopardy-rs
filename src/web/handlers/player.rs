@@ -6,14 +6,15 @@ use tokio::time::timeout;
 
 use crate::global::ResponseType;
 use crate::handlers::{
-    CREATE_LOBBY_ERROR_MSG, INVALID_LOBBY_NAME_ERROR_MSG, InternalError, LOGIN_TIMEOUT,
-    PlayerHandlerError, UserError,
+    CREATE_LOBBY_ERROR_MSG, INVALID_LOBBY_NAME_ERROR_MSG, LOGIN_TIMEOUT, PlayerHandlerError,
+    UserError,
 };
 use crate::web::game::lobby::{self, Lobby};
+use crate::web::game::lobby_manager;
 use crate::{
     global::{JeopardyGlobalState, RequestType},
     json_websocket::JsonWebSocket,
-    web::game::{LobbyManagerError, lobby::LobbyError, player::Player},
+    web::game::{LobbyManagerError, player::Player},
 };
 use axum::{
     extract::{State, WebSocketUpgrade},
@@ -32,18 +33,18 @@ pub async fn create_lobby(
     else {
         return (StatusCode::BAD_REQUEST, CREATE_LOBBY_ERROR_MSG.to_string());
     };
-    if !lobby::is_valid_lobby_name(&lobby_name) {
+    if !lobby_manager::is_valid_lobby_name(&lobby_name) {
         return (
             StatusCode::BAD_REQUEST,
             INVALID_LOBBY_NAME_ERROR_MSG.to_string(),
         );
     }
-    let new_lobby = Lobby::new(lobby_name, password);
+    let new_lobby = Lobby::new(lobby_name.clone(), password);
     let mut lobby_wg = global_state.write().await;
     match lobby_wg.get_mut_manager().add(new_lobby) {
-        Ok(ref lobby) => (
+        Ok(_) => (
             StatusCode::OK,
-            format!("Lobby '{}' created successfully.", lobby.get_name()),
+            format!("Lobby '{}' created successfully.", &lobby_name),
         ),
         Err(e) => match e {
             LobbyManagerError::Internal(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -108,6 +109,7 @@ pub async fn websocket_handler(
     }
 }
 
+/// internal struct to return the
 pub struct LoginResponse<T: Serialize> {
     username: String,
     lobby_name: String,
@@ -145,12 +147,7 @@ pub async fn login_handler(
     let (writer, receiver) = mpsc::channel(1);
     let player = Player::new(username.clone(), writer);
     // 4. add to lobby
-    lobby.add_player(player).map_err(|e| match e {
-        LobbyError::Internal(internal_error) => {
-            PlayerHandlerError::Internal(InternalError::LobbyError(internal_error))
-        }
-        LobbyError::User(user_error) => PlayerHandlerError::User(UserError::LobbyError(user_error)),
-    })?;
+    lobby.add_player(player)?;
 
     Ok(LoginResponse {
         username,
@@ -188,4 +185,88 @@ pub async fn player_handler(
     username: &str,
 ) -> Result<(), PlayerHandlerError> {
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(non_snake_case)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::{
+        global::{GlobalState, RequestType},
+        handlers::player::{LoginResponse, login_handler},
+        json_websocket::{self, JsonWebSocket, JsonWebsocketError, TextTransport},
+        web::game::lobby::Lobby,
+    };
+    use bytes::Bytes;
+    use tokio::sync::RwLock;
+
+    const TEST_LOBBY_NAME: &str = "test_lobby";
+    const TEST_LOBBY_PASSWORD: &str = "test_password";
+    const TEST_USERNAME: &str = "test_username";
+
+    pub struct LoginMockWebSocket {}
+
+    #[async_trait::async_trait]
+    impl TextTransport for LoginMockWebSocket {
+        async fn read_text(&mut self) -> Result<Bytes, JsonWebsocketError> {
+            let login_request = RequestType::Login {
+                username: TEST_USERNAME.to_string(),
+                lobby_name: TEST_LOBBY_NAME.to_string(),
+                password: TEST_LOBBY_PASSWORD.to_string(),
+            };
+            let serialized = serde_json::to_vec(&login_request)
+                .map_err(|e| json_websocket::InternalError::Json(e))?;
+            Ok(Bytes::from(serialized))
+        }
+        async fn send_text(&mut self, _msg: &str) -> Result<(), JsonWebsocketError> {
+            Ok(())
+        }
+        async fn disconnect(
+            self: Box<Self>,
+            _user_error: bool,
+            _msg: Option<&str>,
+        ) -> Result<(), JsonWebsocketError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn GIVEN_json_ws_WHEN_login_handler_THEN_ok() {
+        // GIVEN
+        let mut json_ws = JsonWebSocket::new(LoginMockWebSocket {});
+        let global_state = Arc::new(RwLock::new(GlobalState::new()));
+
+        // create test lobby for the test player to join
+        global_state
+            .write()
+            .await
+            .get_mut_manager()
+            .add(Lobby::new(
+                TEST_LOBBY_NAME.to_string(),
+                TEST_LOBBY_PASSWORD.to_string(),
+            ))
+            .unwrap();
+
+        // WHEN
+        let result = login_handler(&global_state, &mut json_ws).await;
+
+        // THEN
+        assert!(matches!(
+            result,
+            Ok(LoginResponse{ username, lobby_name, .. })
+                if username == TEST_USERNAME && lobby_name == TEST_LOBBY_NAME
+        ));
+        let player_found_in_lobby = global_state
+            .write()
+            .await
+            .get_manager()
+            .get(TEST_LOBBY_NAME)
+            .unwrap()
+            .get_player(TEST_USERNAME)
+            .is_ok_and(|player| player.get_name() == TEST_USERNAME);
+        assert!(player_found_in_lobby)
+    }
+
+    // TODO: negative login tests,
 }
