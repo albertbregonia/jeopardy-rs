@@ -38,7 +38,7 @@ where
     _input_type_bound: PhantomData<I>,
     _output_type_bound: PhantomData<O>,
     // lowk doing it this way to force type erasure is annoying and verbose
-// compared to doing this with generics ;_;
+    // compared to doing this with generics ;_;
     // bc i have to use async_trait, Box<> + Send + 'static, etc.
     // but top level, it should not matter what specific SocketLike impl is being used.
     // functionality is represented by the trait, end of story.

@@ -2,9 +2,13 @@ use axum::Json;
 use axum::http::StatusCode;
 use serde::Serialize;
 use tokio::sync::mpsc::Receiver;
+use tokio::time::timeout;
 
 use crate::global::ResponseType;
-use crate::handlers::{CREATE_LOBBY_ERROR_MSG, INVALID_LOBBY_NAME_ERROR_MSG, InternalError, PlayerHandlerError, UserError};
+use crate::handlers::{
+    CREATE_LOBBY_ERROR_MSG, INVALID_LOBBY_NAME_ERROR_MSG, InternalError, LOGIN_TIMEOUT,
+    PlayerHandlerError, UserError,
+};
 use crate::web::game::lobby::{self, Lobby};
 use crate::{
     global::{JeopardyGlobalState, RequestType},
@@ -55,10 +59,18 @@ pub async fn websocket_upgrader(
 ) -> impl IntoResponse {
     // NOTE: a websocket is needed for players bc a live connection is needed for
     // bidirectional input (buzzer, live game state, etc.)
-    ws.on_upgrade(|socket| websocket_handler(global_state, JsonWebSocket::new(socket)))
+    ws.on_upgrade(|socket| async {
+        let _ = timeout(
+            LOGIN_TIMEOUT,
+            websocket_handler(global_state, JsonWebSocket::new(socket)),
+        );
+    })
 }
 
-pub async fn websocket_handler(global_state: JeopardyGlobalState, mut json_ws: JsonWebSocket<RequestType, ResponseType>) {
+pub async fn websocket_handler(
+    global_state: JeopardyGlobalState,
+    mut json_ws: JsonWebSocket<RequestType, ResponseType>,
+) {
     // attempt to login and handle events, upon error, send it on websocket
     match login_handler(&global_state, &mut json_ws).await {
         Ok(LoginResponse {

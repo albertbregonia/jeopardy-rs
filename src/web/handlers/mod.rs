@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use thiserror::Error;
 
 use crate::{
@@ -12,6 +14,7 @@ use crate::{
 pub mod host;
 pub mod player;
 
+pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
 pub const CREATE_LOBBY_ERROR_MSG: &str = "Malformed create lobby request";
 pub const INVALID_LOBBY_NAME_ERROR_MSG: &str =
     "Invalid lobby name. Must be lowercase and alphanumeric (underscores permitted)";
