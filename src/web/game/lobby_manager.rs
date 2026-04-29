@@ -79,20 +79,23 @@ where
     }
 }
 
-// lobby name must be all lowercase alphanumeric (including underscore)
+// lobby name must be all lowercase alphanumeric (including special chars)
 // remove all other characters otherwise.
 pub fn sanitize_name(name: &str) -> String {
     name.chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .filter(|c| c.is_ascii_graphic())
         .map(|c| c.to_ascii_lowercase())
         .collect()
 }
 
-pub fn is_valid_lobby_name(name: &str) -> bool {
-    name.len() > 0
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() && c.is_ascii_lowercase() || c == '_')
+pub fn is_valid_lobby_name(name: &str, max_length: usize) -> bool {
+    let n = name.len();
+    let non_zero_length = n > 0;
+    let under_length_limit = n <= max_length;
+    let lowercase_visible_ascii = name
+        .chars()
+        .all(|c| (c.is_ascii_graphic() && c.is_ascii_lowercase()) || c.is_ascii_punctuation());
+    non_zero_length && under_length_limit && lowercase_visible_ascii
 }
 
 pub struct LobbyMap<T: Serialize + Debug> {
@@ -120,23 +123,26 @@ mod lobby_map_tests {
     use super::*;
 
     const TEST_LOBBY_NAME: &str = "test_lobby";
-    const TEST_INVALID_LOBBY_NAME: &str = "test_lobby@";
+    const TEST_INVALID_LOBBY_NAME: &str = "TEST_LOBBY";
     const TEST_LOBBY_PASSWORD: &str = "test_password";
+    const TEST_MAX_NAME_LENGTH: usize = 32;
 
     #[test]
     fn GIVEN_invalid_lobby_name_WHEN_sanitize_THEN_ok() {
         // GIVEN
         let name = TEST_INVALID_LOBBY_NAME;
         // WHEN/THEN
-        assert_eq!(is_valid_lobby_name(name), false);
+        assert_eq!(is_valid_lobby_name(name, TEST_MAX_NAME_LENGTH), false);
         // sanitize removes invalid chars and makes lowercase
-        assert_eq!(sanitize_name(name), TEST_LOBBY_NAME);
+        let sanitized = sanitize_name(name);
+        assert_eq!(sanitized, TEST_LOBBY_NAME);
+        assert!(is_valid_lobby_name(&sanitized, TEST_MAX_NAME_LENGTH));
     }
 
     #[test]
     fn GIVEN_valid_lobby_name_WHEN_sanitize_THEN_ok() {
         let name = TEST_LOBBY_NAME;
-        assert!(is_valid_lobby_name(name));
+        assert!(is_valid_lobby_name(name, TEST_MAX_NAME_LENGTH));
         assert_eq!(sanitize_name(name), name); // sanitize does nothing here
     }
 

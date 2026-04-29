@@ -16,8 +16,8 @@ pub mod player;
 
 pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
 pub const CREATE_LOBBY_ERROR_MSG: &str = "Malformed create lobby request";
-pub const INVALID_LOBBY_NAME_ERROR_MSG: &str =
-    "Invalid lobby name. Must be lowercase and alphanumeric (underscores permitted)";
+pub const INVALID_LOBBY_NAME_ERROR_FORMAT_MSG: &str = "Invalid lobby name. Must be lowercase and alphanumeric (special chars permitted) with length 0-{}";
+pub const MAX_NAME_LENGTH: usize = 32;
 
 #[derive(Debug, Error)]
 // top level error type for player events
@@ -45,6 +45,8 @@ pub enum UserError {
 // enum rewrap simply to distinguish between user error and internal failure
 #[derive(Debug, Error)]
 pub enum InternalError {
+    #[error("End of channel")]
+    EndOfChannel,
     #[error("{0}")]
     WebSocket(#[from] json_websocket::InternalError),
     #[error("{0}")]

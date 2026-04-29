@@ -15,7 +15,9 @@ pub enum PlayerRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum PlayerResponse {}
+pub enum PlayerResponse {
+    UserError { error_msg: String },
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum HostRequest {}

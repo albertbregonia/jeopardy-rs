@@ -18,6 +18,8 @@ pub enum UserError {
     UsernameTaken(String),
     #[error("Username '{0}' not found in the lobby.")]
     UserNotFound(String),
+    #[error("Invalid username: {0}. Must be valid ASCII and of length 0-{1}")]
+    InvalidUsername(String, usize),
 }
 
 #[derive(Debug, Error)]
@@ -100,11 +102,11 @@ mod lobby_tests {
 
     fn create_test_player<T: Serialize + Debug>(name: &str) -> Player<T> {
         let (sender, _receiver) = mpsc::channel(1);
-        let mut p = Player::new(name.to_string(), sender);
-        p.set_input(TEST_PLAYER_INPUT.to_string()).unwrap();
-        p.set_points(TEST_PLAYER_POINTS).unwrap();
-        p.set_wager(TEST_PLAYER_WAGER).unwrap();
-        p
+        let mut player = Player::new(name.to_string(), sender);
+        player.set_input(TEST_PLAYER_INPUT.to_string()).unwrap();
+        player.set_points(TEST_PLAYER_POINTS).unwrap();
+        player.set_wager(TEST_PLAYER_WAGER).unwrap();
+        player
     }
 
     #[test]

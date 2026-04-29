@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    routing::{get, put},
+    routing::{get, post},
 };
 
 use crate::{
@@ -12,5 +12,5 @@ use crate::{
 pub fn routes() -> Router<JeopardyGlobalState> {
     Router::new()
         .route(LOGIN_PATH, get(websocket_upgrader))
-        .route(CREATE_LOBBY_PATH, put(create_lobby))
+        .route(CREATE_LOBBY_PATH, post(create_lobby))
 }
