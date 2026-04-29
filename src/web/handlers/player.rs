@@ -34,7 +34,7 @@ pub async fn create_lobby(
         return (StatusCode::BAD_REQUEST, CREATE_LOBBY_ERROR_MSG.to_string());
     };
     if !lobby_manager::is_valid_lobby_name(&lobby_name, MAX_NAME_LENGTH) {
-        tracing::warn!("Invalid password attempt on {lobby_name}");
+        tracing::warn!("Invalid create lobby attempt with name: {lobby_name}");
         return (
             StatusCode::BAD_REQUEST,
             INVALID_LOBBY_NAME_ERROR_FORMAT_MSG.to_string(),
@@ -55,7 +55,7 @@ pub async fn create_lobby(
                 tracing::error!("Internal Server Error during lobby creation: {internal_error}");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    internal_error.to_string(),
+                    "Internal Server Error".to_string(),
                 )
             }
             user_error => {
@@ -73,14 +73,33 @@ pub async fn websocket_upgrader(
 ) -> impl IntoResponse {
     // NOTE: a websocket is needed for players bc a live connection is needed for
     // bidirectional input (buzzer, live game state, etc.)
-    ws.on_upgrade(|socket| websocket_handler(global_state, JsonWebSocket::new(socket)))
+    ws.on_upgrade(|socket| async move {
+        let json_ws = JsonWebSocket::new(socket);
+        let mut conn = PlayerConnection::new(global_state.clone(), json_ws);
+        // reuse connection loop if a player wants to connect on a different lobby
+        loop {
+            if let Err(e) = player_state_machine(&mut conn).await {
+                match e {
+                    // TODO: re-evalutate this, user errors shouldn't occur?
+                    PlayerHandlerError::User(user_error) => {
+                        tracing::warn!("User error: {user_error}");
+                        let _ = conn.handle_user_error(user_error.into()).await
+                            .inspect_err(|e| tracing::warn!("Failure during user error handling: {e}"));
+                    }
+                    PlayerHandlerError::Internal(internal_error) => {
+                        tracing::error!("Internal server error: {internal_error}");
+                        let _ = conn.handle_internal_error(internal_error.into())
+                            .await
+                            .inspect_err(|e| tracing::error!("Failure during internal error handling {e}"));
+                        return;
+                    }
+                }
+            }
+        };
+    })
 }
 
-pub async fn websocket_handler(
-    global_state: JeopardyGlobalState,
-    json_ws: JsonWebSocket<RequestType, ResponseType>,
-) {
-    let mut conn = PlayerConnection::new(global_state, json_ws);
+pub async fn player_state_machine(conn: &mut PlayerConnection) -> Result<(), PlayerHandlerError> {
     let receiver = loop {
         // TODO: throttling
         match conn.login().await {
@@ -88,24 +107,14 @@ pub async fn websocket_handler(
             Err(e) => match e {
                 PlayerHandlerError::User(user_error) => {
                     tracing::warn!("User error during login: {user_error}");
-                    let _ = conn.handle_user_error(user_error).await.inspect_err(|e| {
-                        tracing::error!("Failure during user error handling: {e}")
-                    });
+                    conn.handle_user_error(user_error).await?;
                 }
-                PlayerHandlerError::Internal(internal_error) => {
-                    tracing::warn!("Internal server error during login: {internal_error}");
-                    let _ = conn
-                        .handle_internal_error(internal_error)
-                        .await
-                        .inspect_err(|e| {
-                            tracing::error!("Failure during internal error handling: {e}")
-                        });
-                    return; // conn gets dropped here and disconnects regardless
-                }
+                other => return Err(other),
             },
         }
     };
     if let Err(e) = conn.main(receiver).await {
+        // TODO: we handle the error here but don't propagate upward? lowk ok?
         match e {
             PlayerHandlerError::User(user_error) => {
                 tracing::error!("User error during main player handling: {user_error}");
@@ -117,11 +126,11 @@ pub async fn websocket_handler(
             }
         }
         // NOTE: no matter the error, disconnect the player from the lobby
-        let _ = conn
-            .leave_lobby()
-            .await
-            .inspect_err(|e| tracing::error!("Failure during removal of player from lobby: {e}"));
+        // the main player handler should respond back with PlayerResponse::UserError if recoverable
+        // if the main() returns with an error that is the end of the session.
+        conn.leave_lobby().await?;
     }
+    Ok(())
 }
 
 // thin wrapper around JsonWebSocket and JeopardyGlobalState
@@ -132,6 +141,7 @@ pub struct PlayerConnection {
     creds: Option<LoginResponse>,
 }
 
+// TODO: ensure that PlayerConnection is reusable and be reused in other lobbies
 impl PlayerConnection {
     pub fn new(
         global_state: JeopardyGlobalState,
@@ -144,35 +154,23 @@ impl PlayerConnection {
         }
     }
 
-    pub async fn leave_lobby(mut self) -> Result<(), PlayerHandlerError> {
+    pub async fn leave_lobby(&mut self) -> Result<Player<ResponseType>, PlayerHandlerError> {
         let Some(LoginResponse {
             ref username,
             ref lobby_name,
         }) = self.creds
         else {
-            return Err(PlayerHandlerError::User(UserError::ExpectedLoginRequest));
+            return Err(PlayerHandlerError::Internal(InternalError::UserNotLoggedIn));
         };
-        let lobby_removal_error = self
+        let player = self
             .global_state
             .write()
             .await
             .get_mut_manager()
             .get_mut(lobby_name)
-            .map(|lobby| lobby.remove_player(username))
-            .err(); // we don't care about the return value here, drop
-
-        if let Some(lobby_manager_error) = lobby_removal_error {
-            tracing::error!("Failed to remove {username} from lobby: '{lobby_name}'");
-            match lobby_manager_error {
-                LobbyManagerError::User(user_error) => {
-                    self.handle_user_error(user_error.into()).await?;
-                }
-                LobbyManagerError::Internal(internal_error) => {
-                    self.handle_internal_error(internal_error.into()).await?;
-                }
-            };
-        }
-        Ok(())
+            .map(|lobby| lobby.remove_player(username))??;
+        self.creds = None;
+        Ok(player)
     }
 
     pub async fn login(&mut self) -> Result<Receiver<ResponseType>, PlayerHandlerError> {

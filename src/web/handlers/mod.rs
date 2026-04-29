@@ -47,6 +47,8 @@ pub enum UserError {
 pub enum InternalError {
     #[error("End of channel")]
     EndOfChannel,
+    #[error("Expected player connection to be logged in.")]
+    UserNotLoggedIn,
     #[error("{0}")]
     WebSocket(#[from] json_websocket::InternalError),
     #[error("{0}")]
