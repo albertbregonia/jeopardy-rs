@@ -30,33 +30,27 @@ pub enum InternalError {
     Json(#[from] serde_json::Error),
 }
 
-pub struct JsonWebSocket<I, O>
+pub struct JsonWebSocket<W, I, O>
 where
+    W: TextTransport,
     I: DeserializeOwned,
     O: Serialize,
 {
     _input_type_bound: PhantomData<I>,
     _output_type_bound: PhantomData<O>,
-    // lowk doing it this way to force type erasure is annoying and verbose
-    // compared to doing this with generics ;_;
-    // bc i have to use async_trait, Box<> + Send + 'static, etc.
-    // but top level, it should not matter what specific SocketLike impl is being used.
-    // functionality is represented by the trait, end of story.
-    socket: Box<dyn TextTransport + Send + 'static>,
+    socket: W,
 }
 
-#[async_trait::async_trait]
 pub trait TextTransport {
     async fn read_text(&mut self) -> Result<Bytes, JsonWebsocketError>;
     async fn send_text(&mut self, msg: &str) -> Result<(), JsonWebsocketError>;
     async fn disconnect(
-        self: Box<Self>,
+        self,
         user_error: bool,
         msg: Option<&str>,
     ) -> Result<(), JsonWebsocketError>;
 }
 
-#[async_trait::async_trait]
 impl TextTransport for WebSocket {
     async fn read_text(&mut self) -> Result<Bytes, JsonWebsocketError> {
         let raw_msg = self
@@ -80,7 +74,7 @@ impl TextTransport for WebSocket {
     }
 
     async fn disconnect(
-        mut self: Box<Self>,
+        mut self,
         user_error: bool,
         msg: Option<&str>,
     ) -> Result<(), JsonWebsocketError> {
@@ -106,16 +100,17 @@ impl TextTransport for WebSocket {
     }
 }
 
-impl<I, O> JsonWebSocket<I, O>
+impl<W, I, O> JsonWebSocket<W, I, O>
 where
+    W: TextTransport,
     I: DeserializeOwned,
     O: Serialize,
 {
-    pub fn new(socket: impl TextTransport + Send + 'static) -> Self {
+    pub fn new(socket: W) -> Self {
         Self {
             _input_type_bound: PhantomData,
             _output_type_bound: PhantomData,
-            socket: Box::new(socket),
+            socket,
         }
     }
 

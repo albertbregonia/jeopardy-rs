@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use thiserror::Error;
+use tokio::time::error::Elapsed;
 
 use crate::{
     json_websocket::{self, JsonWebsocketError},
@@ -14,10 +15,12 @@ use crate::{
 pub mod host;
 pub mod player;
 
-pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
 pub const CREATE_LOBBY_ERROR_MSG: &str = "Malformed create lobby request";
 pub const INVALID_LOBBY_NAME_ERROR_FORMAT_MSG: &str = "Invalid lobby name. Must be lowercase and alphanumeric (special chars permitted) with length 0-{}";
+// TODO: make the following values configurable via a JSON config
+pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
 pub const MAX_NAME_LENGTH: usize = 32;
+pub const MAX_LOGIN_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Error)]
 // top level error type for player events
@@ -30,6 +33,10 @@ pub enum PlayerHandlerError {
 
 #[derive(Debug, Error)]
 pub enum UserError {
+    #[error("User connection timed out, elapsed: {0}")]
+    RequestTimeout(#[from] Elapsed),
+    #[error("User exceeded max read request attempt limit")]
+    ExceededAttemptLimit,
     #[error("Incorrect password for the desired lobby: {0}")]
     IncorrectLobbyPassword(String),
     #[error("Expected a login request from the client that was not received.")]

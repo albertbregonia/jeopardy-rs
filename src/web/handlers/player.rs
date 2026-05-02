@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use axum::Json;
 use axum::http::StatusCode;
 use tokio::sync::mpsc::{self, Receiver};
@@ -6,9 +8,9 @@ use tokio::time::timeout;
 use crate::global::ResponseType;
 use crate::handlers::{
     CREATE_LOBBY_ERROR_MSG, INVALID_LOBBY_NAME_ERROR_FORMAT_MSG, InternalError, LOGIN_TIMEOUT,
-    MAX_NAME_LENGTH, PlayerHandlerError, UserError,
+    MAX_LOGIN_ATTEMPTS, MAX_NAME_LENGTH, PlayerHandlerError, UserError,
 };
-use crate::json_websocket::JsonWebsocketError;
+use crate::json_websocket::{JsonWebsocketError, TextTransport};
 use crate::web::game::lobby::{self, Lobby};
 use crate::web::game::lobby_manager;
 use crate::{
@@ -42,15 +44,8 @@ pub async fn create_lobby(
     }
     let new_lobby = Lobby::new(lobby_name.clone(), password);
     let mut lobby_wg = global_state.write().await;
-    match lobby_wg.get_mut_manager().add(new_lobby) {
-        Ok(_) => {
-            tracing::info!("Successfully created '{lobby_name}'");
-            (
-                StatusCode::OK,
-                format!("Lobby '{lobby_name}' created successfully."),
-            )
-        }
-        Err(e) => match e {
+    if let Err(e) = lobby_wg.get_mut_manager().add(new_lobby) {
+        let response = match e {
             LobbyManagerError::Internal(internal_error) => {
                 tracing::error!("Internal Server Error during lobby creation: {internal_error}");
                 (
@@ -62,8 +57,14 @@ pub async fn create_lobby(
                 tracing::warn!("User error during lobby creation: {user_error}");
                 (StatusCode::BAD_REQUEST, user_error.to_string())
             }
-        },
+        };
+        return response;
     }
+    tracing::info!("Successfully created '{lobby_name}'");
+    (
+        StatusCode::OK,
+        format!("Lobby '{lobby_name}' created successfully."),
+    )
 }
 
 /// top level websocket handler
@@ -77,75 +78,97 @@ pub async fn websocket_upgrader(
         let json_ws = JsonWebSocket::new(socket);
         let mut conn = PlayerConnection::new(global_state.clone(), json_ws);
         // reuse connection loop if a player wants to connect on a different lobby
+        // TODO: however, we will need to think of softlocks here and unused connections piling up
+        // the login request timeout should be configured to easily reuse the connection 
+        // but also shut down unused connections properly (lowk like a cache)
         loop {
             if let Err(e) = player_state_machine(&mut conn).await {
-                match e {
-                    // TODO: re-evalutate this, user errors shouldn't occur?
-                    PlayerHandlerError::User(user_error) => {
-                        tracing::warn!("User error: {user_error}");
-                        let _ = conn.handle_user_error(user_error.into()).await
-                            .inspect_err(|e| tracing::warn!("Failure during user error handling: {e}"));
-                    }
-                    PlayerHandlerError::Internal(internal_error) => {
-                        tracing::error!("Internal server error: {internal_error}");
-                        let _ = conn.handle_internal_error(internal_error.into())
-                            .await
-                            .inspect_err(|e| tracing::error!("Failure during internal error handling {e}"));
-                        return;
-                    }
-                }
+                // NOTE: this may be confusing!
+                // since we may encounter a fatal error and need to close the connection,
+                // we need to give up ownership temporarily.
+                // if the connection is not consumed, it is passed back for reuse.
+                conn = match player_error_handler(conn, e).await {
+                    Some(conn) => conn,
+                    None => return,
+                };
             }
-        };
+        }
     })
 }
 
-pub async fn player_state_machine(conn: &mut PlayerConnection) -> Result<(), PlayerHandlerError> {
-    let receiver = loop {
-        // TODO: throttling
-        match conn.login().await {
-            Ok(receiver) => break receiver,
-            Err(e) => match e {
-                PlayerHandlerError::User(user_error) => {
-                    tracing::warn!("User error during login: {user_error}");
-                    conn.handle_user_error(user_error).await?;
+pub async fn player_error_handler<W>(
+    mut conn: PlayerConnection<W>,
+    e: PlayerHandlerError,
+) -> Option<PlayerConnection<W>>
+where
+    W: TextTransport,
+{
+    match e {
+        PlayerHandlerError::User(user_error) => {
+            tracing::warn!("User error: {user_error}");
+            let _ = match user_error {
+                UserError::ExceededAttemptLimit => {
+                    let _ = conn
+                        .handle_irrecoverable_user_error(user_error)
+                        .await
+                        .inspect_err(|e| {
+                            tracing::warn!("Fatal failure during user error handling: {e}")
+                        });
+                    return None;
                 }
-                other => return Err(other),
-            },
+                _ => conn
+                    .handle_recoverable_user_error(user_error)
+                    .await
+                    .inspect_err(|e| tracing::warn!("Failure during user error handling: {e}")),
+            };
         }
-    };
-    if let Err(e) = conn.main(receiver).await {
-        // TODO: we handle the error here but don't propagate upward? lowk ok?
-        match e {
-            PlayerHandlerError::User(user_error) => {
-                tracing::error!("User error during main player handling: {user_error}");
-            }
-            PlayerHandlerError::Internal(internal_error) => {
-                tracing::error!(
-                    "Internal server error during main player handling: {internal_error}"
-                );
-            }
+        PlayerHandlerError::Internal(internal_error) => {
+            tracing::error!("Internal server error: {internal_error}");
+            let _ = conn
+                .handle_internal_error(internal_error)
+                .await
+                .inspect_err(|e| tracing::error!("Failure during internal error handling {e}"));
+            return None;
         }
+    }
+    Some(conn)
+}
+
+pub async fn player_state_machine<W: TextTransport>(
+    conn: &mut PlayerConnection<W>,
+) -> Result<(), PlayerHandlerError> {
+    let receiver = conn.login_loop(MAX_LOGIN_ATTEMPTS).await?;
+    if let Err(main_error) = conn.main(receiver).await {
         // NOTE: no matter the error, disconnect the player from the lobby
-        // the main player handler should respond back with PlayerResponse::UserError if recoverable
-        // if the main() returns with an error that is the end of the session.
-        conn.leave_lobby().await?;
+        // the inspect_err here is to log the leave_lobby() error if fails.
+        // this is because it is more important to inform the player of the error that caused their disconnect
+        // rather than whatever internal issue that caused the leave_lobby to fail
+        // if this was prod there would be some sort of error metric emitted to alarm
+        let _ = conn
+            .leave_lobby()
+            .await
+            .inspect_err(|e| tracing::error!("Failed to remove player from lobby: {e}"));
+        return Err(main_error);
     }
     Ok(())
 }
 
 // thin wrapper around JsonWebSocket and JeopardyGlobalState
 // to easier handle errors and lifetimes of the player
-pub struct PlayerConnection {
+pub struct PlayerConnection<W: TextTransport> {
     global_state: JeopardyGlobalState,
-    json_ws: JsonWebSocket<RequestType, ResponseType>,
+    json_ws: JsonWebSocket<W, RequestType, ResponseType>,
     creds: Option<LoginResponse>,
 }
 
 // TODO: ensure that PlayerConnection is reusable and be reused in other lobbies
-impl PlayerConnection {
+impl<W> PlayerConnection<W>
+where
+    W: TextTransport,
+{
     pub fn new(
         global_state: JeopardyGlobalState,
-        json_ws: JsonWebSocket<RequestType, ResponseType>,
+        json_ws: JsonWebSocket<W, RequestType, ResponseType>,
     ) -> Self {
         PlayerConnection {
             global_state,
@@ -156,9 +179,9 @@ impl PlayerConnection {
 
     pub async fn leave_lobby(&mut self) -> Result<Player<ResponseType>, PlayerHandlerError> {
         let Some(LoginResponse {
-            ref username,
-            ref lobby_name,
-        }) = self.creds
+            username,
+            lobby_name,
+        }) = self.creds.take()
         else {
             return Err(PlayerHandlerError::Internal(InternalError::UserNotLoggedIn));
         };
@@ -167,24 +190,31 @@ impl PlayerConnection {
             .write()
             .await
             .get_mut_manager()
-            .get_mut(lobby_name)
-            .map(|lobby| lobby.remove_player(username))??;
-        self.creds = None;
+            .get_mut(&lobby_name)
+            .map(|lobby| lobby.remove_player(&username))??;
         Ok(player)
     }
 
-    pub async fn login(&mut self) -> Result<Receiver<ResponseType>, PlayerHandlerError> {
+    pub async fn read_request(
+        &mut self,
+        max_timeout: Duration,
+    ) -> Result<RequestType, PlayerHandlerError> {
+        let request = timeout(max_timeout, self.json_ws.read_json())
+            .await
+            .map_err(|e| UserError::RequestTimeout(e))??;
+        Ok(request)
+    }
+
+    pub async fn join_lobby(
+        &mut self,
+        login: RequestType,
+    ) -> Result<Receiver<ResponseType>, PlayerHandlerError> {
         // 1. parse request
         let RequestType::Login {
             username,
             lobby_name,
             password,
-        } = timeout(LOGIN_TIMEOUT, self.json_ws.read_json()) // prevent soft lock
-            .await
-            .map_err(|_| {
-                tracing::warn!("Player timed out attempting to connect to a lobby");
-                UserError::ExpectedLoginRequest
-            })??
+        } = login
         else {
             return Err(PlayerHandlerError::User(UserError::ExpectedLoginRequest));
         };
@@ -224,6 +254,28 @@ impl PlayerConnection {
         Ok(receiver)
     }
 
+    /// re-attempts join_lobby attempt `max_attempts` times
+    /// sending the user error message over the websocket when unsuccessful
+    pub async fn login_loop(
+        &mut self,
+        max_attempts: usize,
+    ) -> Result<Receiver<ResponseType>, PlayerHandlerError> {
+        for attempt in 1..=max_attempts {
+            let login = self.read_request(LOGIN_TIMEOUT).await?;
+            match self.join_lobby(login).await {
+                Ok(receiver) => return Ok(receiver),
+                Err(e) => match e {
+                    PlayerHandlerError::User(user_error) => {
+                        tracing::warn!("Attempt {attempt} - User error during login: {user_error}");
+                        self.handle_recoverable_user_error(user_error).await?;
+                    }
+                    other => return Err(other),
+                },
+            }
+        }
+        Err(PlayerHandlerError::User(UserError::ExceededAttemptLimit))
+    }
+
     pub async fn main(
         &mut self,
         mut receiver: Receiver<ResponseType>,
@@ -241,12 +293,22 @@ impl PlayerConnection {
         Ok(())
     }
 
-    pub async fn handle_user_error(&mut self, e: UserError) -> Result<(), JsonWebsocketError> {
+    pub async fn handle_recoverable_user_error(
+        &mut self,
+        e: UserError,
+    ) -> Result<(), JsonWebsocketError> {
         self.json_ws
             .send_json(&ResponseType::UserError {
                 error_msg: e.to_string(),
             })
             .await
+    }
+
+    pub async fn handle_irrecoverable_user_error(
+        self,
+        e: UserError,
+    ) -> Result<(), JsonWebsocketError> {
+        self.json_ws.disconnect(true, Some(&e.to_string())).await
     }
 
     pub async fn handle_internal_error(self, e: InternalError) -> Result<(), JsonWebsocketError> {
@@ -275,33 +337,35 @@ mod tests {
         web::game::lobby::Lobby,
     };
     use bytes::Bytes;
+    use serde::Serialize;
     use tokio::sync::RwLock;
 
     const TEST_LOBBY_NAME: &str = "test_lobby";
     const TEST_LOBBY_PASSWORD: &str = "test_password";
     const TEST_USERNAME: &str = "test_username";
 
-    pub struct LoginMockWebSocket {}
+    struct MockReadSocket<T: Serialize> {
+        msg: T,
+    }
 
-    #[async_trait::async_trait]
-    impl TextTransport for LoginMockWebSocket {
+    impl<T> TextTransport for MockReadSocket<T>
+    where
+        T: Serialize,
+    {
         async fn read_text(&mut self) -> Result<Bytes, JsonWebsocketError> {
-            let login_request = RequestType::Login {
-                username: TEST_USERNAME.to_string(),
-                lobby_name: TEST_LOBBY_NAME.to_string(),
-                password: TEST_LOBBY_PASSWORD.to_string(),
-            };
-            let serialized = serde_json::to_vec(&login_request)
+            let serialized = serde_json::to_vec(&self.msg)
                 .map_err(|e| json_websocket::InternalError::Json(e))?;
             Ok(Bytes::from(serialized))
         }
+
         async fn send_text(&mut self, _msg: &str) -> Result<(), JsonWebsocketError> {
             Ok(())
         }
+
         async fn disconnect(
-            self: Box<Self>,
-            _user_error: bool,
-            _msg: Option<&str>,
+            self,
+            user_error: bool,
+            msg: Option<&str>,
         ) -> Result<(), JsonWebsocketError> {
             Ok(())
         }
@@ -310,7 +374,13 @@ mod tests {
     #[tokio::test]
     async fn GIVEN_json_ws_WHEN_login_handler_THEN_ok() {
         // GIVEN
-        let json_ws = JsonWebSocket::new(LoginMockWebSocket {});
+        let login_request = RequestType::Login {
+            username: TEST_USERNAME.to_string(),
+            lobby_name: TEST_LOBBY_NAME.to_string(),
+            password: TEST_LOBBY_PASSWORD.to_string(),
+        };
+        let socket = MockReadSocket { msg: login_request };
+        let json_ws = JsonWebSocket::new(socket);
         let global_state = Arc::new(RwLock::new(GlobalState::new()));
 
         // create test lobby for the test player to join
@@ -325,9 +395,9 @@ mod tests {
             .unwrap();
 
         let mut conn = PlayerConnection::new(global_state.clone(), json_ws);
-        // WHEN
 
-        let result = conn.login().await;
+        // WHEN
+        let result = conn.login_loop(1).await;
 
         // THEN
         assert!(result.is_ok());
