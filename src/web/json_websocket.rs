@@ -42,13 +42,13 @@ where
 }
 
 pub trait TextTransport {
-    async fn read_text(&mut self) -> Result<Bytes, JsonWebsocketError>;
-    async fn send_text(&mut self, msg: &str) -> Result<(), JsonWebsocketError>;
-    async fn disconnect(
+    fn read_text(&mut self) -> impl Future<Output = Result<Bytes, JsonWebsocketError>>;
+    fn send_text(&mut self, msg: &str) -> impl Future<Output = Result<(), JsonWebsocketError>>;
+    fn disconnect(
         self,
         user_error: bool,
         msg: Option<&str>,
-    ) -> Result<(), JsonWebsocketError>;
+    ) -> impl Future<Output = Result<(), JsonWebsocketError>>;
 }
 
 impl TextTransport for WebSocket {
@@ -116,12 +116,12 @@ where
 
     pub async fn read_json(&mut self) -> Result<I, JsonWebsocketError> {
         let raw_msg = self.socket.read_text().await?;
-        let deserialized = serde_json::from_slice(&raw_msg).map_err(|e| InternalError::Json(e))?;
+        let deserialized = serde_json::from_slice(&raw_msg).map_err(InternalError::Json)?;
         Ok(deserialized)
     }
 
     pub async fn send_json(&mut self, payload: &O) -> Result<(), JsonWebsocketError> {
-        let serialized = serde_json::to_string(payload).map_err(|e| InternalError::Json(e))?;
+        let serialized = serde_json::to_string(payload).map_err(InternalError::Json)?;
         self.socket.send_text(&serialized).await
     }
 
@@ -131,7 +131,7 @@ where
         msg: Option<&str>,
     ) -> Result<(), JsonWebsocketError> {
         // NOTE: this consumes the object (effectively dropping the underlying socket)
-        // this is also just a re-export of disconnect bc Box<> might mess with visibility
+        // this is also just a re-export of TextTransport disconnect
         self.socket.disconnect(user_error, msg).await
     }
 }

@@ -1,6 +1,9 @@
 use super::lobby::Lobby;
 use serde::Serialize;
-use std::{collections::HashMap, fmt::Debug};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -13,6 +16,10 @@ pub enum LobbyManagerError {
 
 #[derive(Debug, Error)]
 pub enum UserError {
+    #[error(
+        "Invalid name: '{0}'. Must be lowercase and alphanumeric (special chars permitted) with length 0-{1}"
+    )]
+    InvalidName(String, usize),
     #[error("Lobby by the name '{0}' was not found in the database")]
     LobbyNotFound(String),
     #[error("Lobby by the name '{0}' already exists in the database")]
@@ -79,34 +86,29 @@ where
     }
 }
 
-// lobby name must be all lowercase alphanumeric (including special chars)
-// remove all other characters otherwise.
-pub fn sanitize_name(name: &str) -> String {
-    name.chars()
-        .filter(|c| c.is_ascii_graphic())
-        .map(|c| c.to_ascii_lowercase())
-        .collect()
-}
-
 pub fn is_valid_lobby_name(name: &str, max_length: usize) -> bool {
     let n = name.len();
     let non_zero_length = n > 0;
     let under_length_limit = n <= max_length;
     let lowercase_visible_ascii = name
         .chars()
-        .all(|c| (c.is_ascii_graphic() && c.is_ascii_lowercase()) || c.is_ascii_punctuation());
+        .all(|c| (c.is_ascii_alphabetic() && c.is_ascii_lowercase()) || c.is_numeric() || c.is_ascii_punctuation());
     non_zero_length && under_length_limit && lowercase_visible_ascii
+}
+
+pub fn is_valid_lobby_name_result(name: &str, max_length: usize) -> Result<(), UserError> {
+    if !is_valid_lobby_name(name, max_length) {
+        return Err(UserError::InvalidName(name.to_string(), max_length));
+    }
+    Ok(())
 }
 
 pub struct LobbyMap<T: Serialize + Debug> {
     lobbies: HashMap<String, Lobby<T>>, // keys are lobby name, values are `Lobby` instances
 }
 
-impl<T> LobbyMap<T>
-where
-    T: Serialize + Debug,
-{
-    pub fn new() -> Self {
+impl <T> Default for LobbyMap<T> where T: Serialize + Debug {
+    fn default() -> Self {
         Self {
             lobbies: HashMap::new(),
         }
@@ -122,34 +124,62 @@ mod lobby_map_tests {
 
     use super::*;
 
-    const TEST_LOBBY_NAME: &str = "test_lobby";
-    const TEST_INVALID_LOBBY_NAME: &str = "TEST_LOBBY";
+    const TEST_LOBBY_NAME: &str = "test_lobby123";
     const TEST_LOBBY_PASSWORD: &str = "test_password";
     const TEST_MAX_NAME_LENGTH: usize = 32;
 
     #[test]
-    fn GIVEN_invalid_lobby_name_WHEN_sanitize_THEN_ok() {
-        // GIVEN
-        let name = TEST_INVALID_LOBBY_NAME;
-        // WHEN/THEN
-        assert_eq!(is_valid_lobby_name(name, TEST_MAX_NAME_LENGTH), false);
-        // sanitize removes invalid chars and makes lowercase
-        let sanitized = sanitize_name(name);
-        assert_eq!(sanitized, TEST_LOBBY_NAME);
-        assert!(is_valid_lobby_name(&sanitized, TEST_MAX_NAME_LENGTH));
+    fn GIVEN_valid_lobby_name_WHEN_is_valid_THEN_ok() {
+        // max length test
+        let name = "a".repeat(TEST_MAX_NAME_LENGTH);
+        assert_eq!(is_valid_lobby_name(&name, TEST_MAX_NAME_LENGTH), true);
+
+        // lowercase test
+        let name = "abcdefghijklmnopqrstuvwxyz";
+        assert_eq!(is_valid_lobby_name(&name, TEST_MAX_NAME_LENGTH), true);
+
+        // valid char test
+        let name = "a12345678910_";
+        assert_eq!(is_valid_lobby_name(&name, TEST_MAX_NAME_LENGTH), true);
+
+        // result test
+        let name = "a12345678910_";
+        assert!(matches!(
+            is_valid_lobby_name_result(name, TEST_MAX_NAME_LENGTH),
+            Ok(())
+        ))
     }
 
     #[test]
-    fn GIVEN_valid_lobby_name_WHEN_sanitize_THEN_ok() {
-        let name = TEST_LOBBY_NAME;
-        assert!(is_valid_lobby_name(name, TEST_MAX_NAME_LENGTH));
-        assert_eq!(sanitize_name(name), name); // sanitize does nothing here
+    fn GIVEN_invalid_lobby_name_WHEN_is_valid_THEN_err() {
+        // min length test
+        let name = "";
+        assert_eq!(is_valid_lobby_name(&name, TEST_MAX_NAME_LENGTH), false);
+
+        // max length test
+        let name = "a".repeat(TEST_MAX_NAME_LENGTH + 1);
+        assert_eq!(is_valid_lobby_name(&name, TEST_MAX_NAME_LENGTH), false);
+
+        // lowercase test, give caps
+        let name = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        assert_eq!(is_valid_lobby_name(&name, TEST_MAX_NAME_LENGTH), false);
+
+        // valid char test, give whitespace char \t
+        let name = "A12345678910_\t";
+        assert_eq!(is_valid_lobby_name(&name, TEST_MAX_NAME_LENGTH), false);
+
+        // result test
+        let name = "a12345678910_\t";
+        assert!(matches!(
+            is_valid_lobby_name_result(&name, TEST_MAX_NAME_LENGTH),
+            Err(UserError::InvalidName(invalid_name, err_max_length)) if name == invalid_name && err_max_length == TEST_MAX_NAME_LENGTH
+        ))
     }
 
     #[test]
     fn GIVEN_empty_lobby_map_WHEN_add_THEN_ok() {
         // GIVEN
-        let mut lobby_map = LobbyMap::<u8>::new();
+        let mut lobby_map = LobbyMap::<u8>::default();
         let new_lobby = Lobby::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_PASSWORD.to_string());
         // WHEN
         lobby_map.add(new_lobby).unwrap();
@@ -162,7 +192,7 @@ mod lobby_map_tests {
     #[test]
     fn GIVEN_lobby_map_with_conflicting_lobby_name_WHEN_add_THEN_err() {
         // GIVEN
-        let mut lobby_map = LobbyMap::<u8>::new();
+        let mut lobby_map = LobbyMap::<u8>::default();
         let new_lobby = Lobby::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_NAME.to_string());
         // WHEN
         lobby_map.add(new_lobby.clone()).unwrap();
@@ -177,7 +207,7 @@ mod lobby_map_tests {
     #[test]
     fn GIVEN_empty_lobby_map_WHEN_get_THEN_err() {
         // GIVEN
-        let lobby_map = LobbyMap::<u8>::new();
+        let lobby_map = LobbyMap::<u8>::default();
         // WHEN
         let result = lobby_map.get(TEST_LOBBY_NAME);
         // THEN
@@ -190,7 +220,7 @@ mod lobby_map_tests {
     #[test]
     fn GIVEN_lobby_map_WHEN_get_THEN_ok() {
         // GIVEN
-        let mut lobby_map = LobbyMap::<u8>::new();
+        let mut lobby_map = LobbyMap::<u8>::default();
         let new_lobby = Lobby::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_PASSWORD.to_string());
         lobby_map.add(new_lobby).unwrap();
         // WHEN
@@ -203,7 +233,7 @@ mod lobby_map_tests {
     #[test]
     fn GIVEN_empty_lobby_map_WHEN_get_mut_THEN_err() {
         // GIVEN
-        let mut lobby_map = LobbyMap::<u8>::new();
+        let mut lobby_map = LobbyMap::<u8>::default();
         // WHEN
         let result = lobby_map.get_mut(TEST_LOBBY_NAME);
         // THEN
@@ -216,7 +246,7 @@ mod lobby_map_tests {
     #[test]
     fn GIVEN_lobby_map_WHEN_get_mut_THEN_ok() {
         // GIVEN
-        let mut lobby_map = LobbyMap::<u8>::new();
+        let mut lobby_map = LobbyMap::<u8>::default();
         let new_lobby = Lobby::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_PASSWORD.to_string());
         lobby_map.add(new_lobby).unwrap();
         // WHEN
@@ -233,7 +263,7 @@ mod lobby_map_tests {
     #[test]
     fn GIVEN_empty_lobby_map_WHEN_remove_THEN_err() {
         // GIVEN
-        let mut lobby_map = LobbyMap::<u8>::new();
+        let mut lobby_map = LobbyMap::<u8>::default();
         // WHEN
         let result = lobby_map.remove(TEST_LOBBY_NAME);
         // THEN
@@ -246,7 +276,7 @@ mod lobby_map_tests {
     #[test]
     fn GIVEN_lobby_map_WHEN_remove_THEN_ok() {
         // GIVEN
-        let mut lobby_map = LobbyMap::<u8>::new();
+        let mut lobby_map = LobbyMap::<u8>::default();
         let new_lobby = Lobby::new(TEST_LOBBY_NAME.to_string(), TEST_LOBBY_PASSWORD.to_string());
         lobby_map.add(new_lobby).unwrap();
         // WHEN

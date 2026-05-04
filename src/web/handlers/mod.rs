@@ -15,8 +15,6 @@ use crate::{
 pub mod host;
 pub mod player;
 
-pub const CREATE_LOBBY_ERROR_MSG: &str = "Malformed create lobby request";
-pub const INVALID_LOBBY_NAME_ERROR_FORMAT_MSG: &str = "Invalid lobby name. Must be lowercase and alphanumeric (special chars permitted) with length 0-{}";
 // TODO: make the following values configurable via a JSON config
 pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
 pub const MAX_NAME_LENGTH: usize = 32;

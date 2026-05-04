@@ -11,6 +11,7 @@ impl Board {
     }
 }
 
+#[allow(unused)]
 pub struct Question {
     question: String,
     answer: String,

@@ -25,7 +25,7 @@ pub struct GlobalState {
 impl GlobalState {
     pub fn new() -> Self {
         Self {
-            manager: Box::new(LobbyMap::new()),
+            manager: Box::new(LobbyMap::default()),
         }
     }
 

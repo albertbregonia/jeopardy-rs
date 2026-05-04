@@ -7,8 +7,8 @@ use tokio::time::timeout;
 
 use crate::global::ResponseType;
 use crate::handlers::{
-    CREATE_LOBBY_ERROR_MSG, INVALID_LOBBY_NAME_ERROR_FORMAT_MSG, InternalError, LOGIN_TIMEOUT,
-    MAX_LOGIN_ATTEMPTS, MAX_NAME_LENGTH, PlayerHandlerError, UserError,
+    InternalError, LOGIN_TIMEOUT, MAX_LOGIN_ATTEMPTS, MAX_NAME_LENGTH, PlayerHandlerError,
+    UserError,
 };
 use crate::json_websocket::{JsonWebsocketError, TextTransport};
 use crate::web::game::lobby::{self, Lobby};
@@ -26,20 +26,37 @@ use axum::{
 pub async fn create_lobby(
     State(global_state): State<JeopardyGlobalState>,
     Json(create_lobby_request): Json<RequestType>,
-) -> impl IntoResponse {
+) -> (StatusCode, String) {
     let RequestType::CreateLobby {
         lobby_name,
         password,
     } = create_lobby_request
     else {
         tracing::warn!("Invalid JSON received in place of create lobby request");
-        return (StatusCode::BAD_REQUEST, CREATE_LOBBY_ERROR_MSG.to_string());
+        return (
+            StatusCode::BAD_REQUEST,
+            "Malformed create lobby request".to_string(),
+        );
     };
     if !lobby_manager::is_valid_lobby_name(&lobby_name, MAX_NAME_LENGTH) {
         tracing::warn!("Invalid create lobby attempt with name: {lobby_name}");
         return (
             StatusCode::BAD_REQUEST,
-            INVALID_LOBBY_NAME_ERROR_FORMAT_MSG.to_string(),
+            format!(
+                "Invalid lobby name. Must be lowercase and alphanumeric (special chars permitted) with length 0-{}",
+                MAX_NAME_LENGTH
+            ),
+        );
+    }
+    // NOTE: validation logic is reused for password as well as lobby name
+    if !lobby_manager::is_valid_lobby_name(&password, MAX_NAME_LENGTH) {
+        tracing::warn!("Invalid create lobby attempt with password: {password}");
+        return (
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Invalid password. Must be lowercase and alphanumeric (special chars permitted) with length 0-{}",
+                MAX_NAME_LENGTH
+            ),
         );
     }
     let new_lobby = Lobby::new(lobby_name.clone(), password);
@@ -79,7 +96,7 @@ pub async fn websocket_upgrader(
         let mut conn = PlayerConnection::new(global_state.clone(), json_ws);
         // reuse connection loop if a player wants to connect on a different lobby
         // TODO: however, we will need to think of softlocks here and unused connections piling up
-        // the login request timeout should be configured to easily reuse the connection 
+        // the login request timeout should be configured to easily reuse the connection
         // but also shut down unused connections properly (lowk like a cache)
         loop {
             if let Err(e) = player_state_machine(&mut conn).await {
@@ -201,7 +218,7 @@ where
     ) -> Result<RequestType, PlayerHandlerError> {
         let request = timeout(max_timeout, self.json_ws.read_json())
             .await
-            .map_err(|e| UserError::RequestTimeout(e))??;
+            .map_err(UserError::RequestTimeout)??;
         Ok(request)
     }
 
@@ -282,7 +299,7 @@ where
     ) -> Result<(), PlayerHandlerError> {
         tokio::select! {
             result = self.json_ws.read_json() => {
-                let request = result?;
+                let _request = result?;
                 // TODO: handle requests from frontend
             }
             result = receiver.recv() => {
@@ -330,12 +347,13 @@ mod tests {
     use crate::{
         global::{GlobalState, RequestType},
         handlers::{
-            LOGIN_TIMEOUT,
-            player::{LoginResponse, PlayerConnection},
+            LOGIN_TIMEOUT, MAX_NAME_LENGTH,
+            player::{LoginResponse, PlayerConnection, create_lobby},
         },
         json_websocket::{self, JsonWebSocket, JsonWebsocketError, TextTransport},
         web::game::lobby::Lobby,
     };
+    use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
     use bytes::Bytes;
     use serde::Serialize;
     use tokio::sync::RwLock;
@@ -364,11 +382,56 @@ mod tests {
 
         async fn disconnect(
             self,
-            user_error: bool,
-            msg: Option<&str>,
+            _user_error: bool,
+            _msg: Option<&str>,
         ) -> Result<(), JsonWebsocketError> {
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn GIVEN_create_lobby_request_WHEN_create_lobby_THEN_ok() {
+        // GIVEN
+        let request = RequestType::CreateLobby {
+            lobby_name: TEST_LOBBY_NAME.to_string(),
+            password: TEST_LOBBY_PASSWORD.to_string(),
+        };
+        let global_state = Arc::new(RwLock::new(GlobalState::new()));
+        // WHEN
+        let (status, msg) = create_lobby(State(global_state), Json(request)).await;
+        // THEN
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            msg,
+            format!("Lobby '{TEST_LOBBY_NAME}' created successfully.")
+        );
+    }
+
+    #[tokio::test]
+    async fn GIVEN_invalid_create_lobby_request_WHEN_create_lobby_THEN_err() {
+        // GIVEN
+        let request = RequestType::CreateLobby {
+            lobby_name: "".to_string(), // invalid lobby name
+            password: TEST_LOBBY_PASSWORD.to_string(),
+        };
+        let global_state = Arc::new(RwLock::new(GlobalState::new()));
+        // WHEN
+        let (status, msg) = create_lobby(State(global_state), Json(request)).await;
+        // THEN
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        // assert_eq!(msg, expected_err_msg);
+    }
+
+    #[tokio::test]
+    async fn GIVEN_non_create_lobby_request_WHEN_create_lobby_THEN_err() {
+        // GIVEN
+        let request = RequestType::Buzzer; // not create_lobby request
+        let global_state = Arc::new(RwLock::new(GlobalState::new()));
+        // WHEN
+        let (status, msg) = create_lobby(State(global_state), Json(request)).await;
+        // THEN
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(msg, "Malformed create lobby request");
     }
 
     #[tokio::test]

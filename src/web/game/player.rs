@@ -64,13 +64,13 @@ where
     }
 
     pub fn set_wager(&mut self, wager: i32) -> Result<(), PlayerError<T>> {
-        if wager as i32 > self.points || wager < 0 {
+        if wager > self.points || wager < 0 {
             return Err(PlayerError::User(UserError::InvalidWager(
                 wager,
                 self.points,
             )));
         }
-        self.wager = wager as i32;
+        self.wager = wager;
         Ok(())
     }
 
