@@ -171,5 +171,6 @@ mod player_tests {
         let result = player.set_free_response(TEST_VALID_FREE_RESPONSE.to_string());
         // THEN
         assert!(result.is_ok());
+        assert_eq!(player.free_response, TEST_VALID_FREE_RESPONSE);
     }
 }
