@@ -20,6 +20,8 @@ pub enum PlayerError<T> {
 pub enum UserError {
     #[error("Wager value of {0} is invalid. It must be between 0 and {1}")]
     InvalidWager(i32, i32),
+    #[error("Free response is invalid. Must be alphanumeric")]
+    InvalidFreeResponse,
 }
 
 #[derive(Debug, Error)]
@@ -34,7 +36,7 @@ pub struct Player<T: Serialize + Debug> {
     channel: Sender<T>, // hook to the original websocket
     points: i32,        // can go negative
     wager: i32,
-    input: String,
+    free_response: String,
 }
 
 impl<T> Player<T>
@@ -47,7 +49,7 @@ where
             channel,
             points: 0,
             wager: 0,
-            input: String::new(),
+            free_response: "No answer".to_string(),
         }
     }
 
@@ -74,26 +76,31 @@ where
         Ok(())
     }
 
-    pub fn get_input(&self) -> &str {
-        &self.input
+    pub fn get_free_response(&self) -> &str {
+        &self.free_response
     }
 
-    pub fn set_input(&mut self, input: String) -> Result<(), PlayerError<T>> {
-        // TODO: validation
-        self.input = input;
+    fn validate_free_response(free_response: &str) -> bool {
+        free_response.chars().all(|c| c.is_alphanumeric() || c.is_whitespace())
+    }
+
+    pub fn set_free_response(&mut self, free_response: String) -> Result<(), PlayerError<T>> {
+        // NOTE: normally this would be validated at the higher level
+        // but in this case, we never want to store input strings that aren't alphanumeric
+        if !Self::validate_free_response(&free_response) {
+            return Err(PlayerError::User(UserError::InvalidFreeResponse));
+        }
+        self.free_response = free_response.trim().to_string();
         Ok(())
     }
 
-    pub fn set_points(&mut self, points: i32) -> Result<(), PlayerError<T>> {
-        // TODO: validation
+    pub fn set_points(&mut self, points: i32) {
         self.points = points;
-        Ok(())
     }
 
-    pub fn update_points(&mut self, delta: i32) -> Result<i32, PlayerError<T>> {
-        // TODO: validation
+    pub fn update_points(&mut self, delta: i32) -> i32 {
         self.points += delta;
-        Ok(self.points)
+        self.points
     }
 
     pub async fn send(&mut self, payload: T) -> Result<(), PlayerError<T>> {
@@ -113,6 +120,8 @@ mod player_tests {
     use super::*;
 
     const TEST_PLAYER_NAME: &str = "player";
+    const TEST_INVALID_FREE_RESPONSE: &str = "the answer.";
+    const TEST_VALID_FREE_RESPONSE: &str = "the answer";
 
     #[test]
     fn GIVEN_invalid_wager_WHEN_set_wager_THEN_err() {
@@ -137,5 +146,30 @@ mod player_tests {
             wager_more_than_owned_result,
             Err(PlayerError::User(UserError::InvalidWager(wager, points))) if wager == wager_more_than_owned && points == player.points
         ));
+    }
+
+    #[test]
+    fn GIVEN_invalid_free_response_WHEN_set_free_response_THEN_err() {
+        // GIVEN
+        let (sender, _receiver) = mpsc::channel::<u8>(1);
+        let mut player = Player::new(TEST_PLAYER_NAME.to_string(), sender);
+        // WHEN
+        let result = player.set_free_response(TEST_INVALID_FREE_RESPONSE.to_string());
+        // THEN
+        assert!(matches!(
+            result,
+            Err(PlayerError::User(UserError::InvalidFreeResponse))
+        ));
+    }
+
+    #[test]
+    fn GIVEN_valid_free_response_WHEN_set_free_response_THEN_ok() {
+        // GIVEN
+        let (sender, _receiver) = mpsc::channel::<u8>(1);
+        let mut player = Player::new(TEST_PLAYER_NAME.to_string(), sender);
+        // WHEN
+        let result = player.set_free_response(TEST_VALID_FREE_RESPONSE.to_string());
+        // THEN
+        assert!(result.is_ok());
     }
 }

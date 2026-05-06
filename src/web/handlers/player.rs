@@ -212,7 +212,7 @@ where
         Ok(player)
     }
 
-    pub async fn read_request(
+    pub async fn read_request_with_timeout(
         &mut self,
         max_timeout: Duration,
     ) -> Result<RequestType, PlayerHandlerError> {
@@ -278,7 +278,7 @@ where
         max_attempts: usize,
     ) -> Result<Receiver<ResponseType>, PlayerHandlerError> {
         for attempt in 1..=max_attempts {
-            let login = self.read_request(LOGIN_TIMEOUT).await?;
+            let login = self.read_request_with_timeout(LOGIN_TIMEOUT).await?;
             match self.join_lobby(login).await {
                 Ok(receiver) => return Ok(receiver),
                 Err(e) => match e {
@@ -297,17 +297,21 @@ where
         &mut self,
         mut receiver: Receiver<ResponseType>,
     ) -> Result<(), PlayerHandlerError> {
-        tokio::select! {
-            result = self.json_ws.read_json() => {
-                let _request = result?;
-                // TODO: handle requests from frontend
-            }
-            result = receiver.recv() => {
-                let response = result.ok_or(PlayerHandlerError::Internal(InternalError::EndOfChannel))?;
-                self.json_ws.send_json(&response).await?;
+        loop {
+            tokio::select! {
+                result = self.json_ws.read_json() => {
+                    let _request = result?;
+                    // TODO: handle requests from frontend
+                    // NOTE: we will have to remember when to drop the lobby
+                }
+
+                // if this gets dropped => internal error => connection gets dropped
+                result = receiver.recv() => {
+                    let response = result.ok_or(PlayerHandlerError::Internal(InternalError::EndOfChannel))?;
+                    self.json_ws.send_json(&response).await?;
+                }
             }
         }
-        Ok(())
     }
 
     pub async fn handle_recoverable_user_error(
@@ -342,21 +346,17 @@ pub struct LoginResponse {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod tests {
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     use crate::{
-        global::{GlobalState, RequestType},
-        handlers::{
-            LOGIN_TIMEOUT, MAX_NAME_LENGTH,
-            player::{LoginResponse, PlayerConnection, create_lobby},
-        },
-        json_websocket::{self, JsonWebSocket, JsonWebsocketError, TextTransport},
-        web::game::lobby::Lobby,
+        global::{GlobalState, RequestType}, handlers::{
+            InternalError, LOGIN_TIMEOUT, MAX_NAME_LENGTH, PlayerHandlerError, player::{LoginResponse, PlayerConnection, create_lobby}
+        }, json_websocket::{self, JsonWebSocket, JsonWebsocketError, TextTransport}, main, web::game::lobby::Lobby
     };
     use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
     use bytes::Bytes;
     use serde::Serialize;
-    use tokio::sync::RwLock;
+    use tokio::{sync::{Notify, RwLock}, time::timeout};
 
     const TEST_LOBBY_NAME: &str = "test_lobby";
     const TEST_LOBBY_PASSWORD: &str = "test_password";
@@ -478,6 +478,47 @@ mod tests {
             .get_player(TEST_USERNAME)
             .is_ok_and(|player| player.get_name() == TEST_USERNAME);
         assert!(player_found_in_lobby)
+    }
+
+    #[tokio::test]
+    async fn GIVEN_json_ws_logged_in_WHEN_lobby_dropped_THEN_ok() {
+        // GIVEN
+        let login_request = RequestType::Login {
+            username: TEST_USERNAME.to_string(),
+            lobby_name: TEST_LOBBY_NAME.to_string(),
+            password: TEST_LOBBY_PASSWORD.to_string(),
+        };
+        let socket = MockReadSocket { msg: login_request };
+        let json_ws = JsonWebSocket::new(socket);
+        let global_state = Arc::new(RwLock::new(GlobalState::new()));
+
+        // create test lobby for the test player to join
+        global_state
+            .write()
+            .await
+            .get_mut_manager()
+            .add(Lobby::new(
+                TEST_LOBBY_NAME.to_string(),
+                TEST_LOBBY_PASSWORD.to_string(),
+            ))
+            .unwrap();
+
+        let mut conn = PlayerConnection::new(global_state.clone(), json_ws);
+        let receiver = conn.login_loop(1).await.unwrap();
+        let notify = Arc::new(Notify::new());
+        let notifier = notify.clone();
+        tokio::spawn(async move {
+            let result = conn.main(receiver).await;
+            assert!(result.is_err_and(|e| {
+                matches!(e, PlayerHandlerError::Internal(InternalError::EndOfChannel))
+            }));
+            notifier.notify_waiters();
+        });
+        // WHEN
+        let lobby = global_state.write().await.get_mut_manager().remove(TEST_LOBBY_NAME).unwrap();
+        drop(lobby);
+        // THEN
+        timeout(Duration::from_secs(5), async { notify.notified().await }).await.unwrap();
     }
 
     // TODO: negative login tests,

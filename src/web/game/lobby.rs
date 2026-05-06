@@ -96,15 +96,15 @@ mod lobby_tests {
     const TEST_LOBBY_NAME: &str = "test_lobby";
     const TEST_LOBBY_PASSWORD: &str = "test_password";
     const TEST_PLAYER_NAME: &str = "test_player";
-    const TEST_PLAYER_INPUT: &str = "test_input";
+    const TEST_PLAYER_FREE_RESPONSE: &str = "test free response";
     const TEST_PLAYER_POINTS: i32 = 100;
     const TEST_PLAYER_WAGER: i32 = 100;
 
     fn create_test_player<T: Serialize + Debug>(name: &str) -> Player<T> {
         let (sender, _receiver) = mpsc::channel(1);
         let mut player = Player::new(name.to_string(), sender);
-        player.set_input(TEST_PLAYER_INPUT.to_string()).unwrap();
-        player.set_points(TEST_PLAYER_POINTS).unwrap();
+        player.set_free_response(TEST_PLAYER_FREE_RESPONSE.to_string()).unwrap();
+        player.set_points(TEST_PLAYER_POINTS);
         player.set_wager(TEST_PLAYER_WAGER).unwrap();
         player
     }
@@ -122,7 +122,7 @@ mod lobby_tests {
         // NOTE: there is no get_player positive test bc it would be identical to this test.
         let player = lobby.get_player(TEST_PLAYER_NAME).unwrap();
         assert_eq!(player.get_name(), TEST_PLAYER_NAME);
-        assert_eq!(player.get_input(), TEST_PLAYER_INPUT);
+        assert_eq!(player.get_free_response(), TEST_PLAYER_FREE_RESPONSE);
         assert_eq!(player.get_points(), TEST_PLAYER_POINTS);
         assert_eq!(player.get_wager(), TEST_PLAYER_WAGER);
     }
@@ -183,7 +183,7 @@ mod lobby_tests {
         let player = lobby.get_mut_player(TEST_PLAYER_NAME).unwrap();
         // THEN
         assert_eq!(player.get_name(), TEST_PLAYER_NAME);
-        player.set_input(String::new()).unwrap(); // this line will not compile if not mut
+        player.set_free_response(String::new()).unwrap(); // this line will not compile if not mut
     }
 
     #[test]
@@ -212,7 +212,7 @@ mod lobby_tests {
         let player = lobby.remove_player(TEST_PLAYER_NAME).unwrap();
         // THEN
         assert_eq!(player.get_name(), TEST_PLAYER_NAME);
-        assert_eq!(player.get_input(), TEST_PLAYER_INPUT);
+        assert_eq!(player.get_free_response(), TEST_PLAYER_FREE_RESPONSE);
         assert_eq!(player.get_points(), TEST_PLAYER_POINTS);
         assert_eq!(player.get_wager(), TEST_PLAYER_WAGER);
     }

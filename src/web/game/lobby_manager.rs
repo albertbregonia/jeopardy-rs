@@ -1,9 +1,6 @@
 use super::lobby::Lobby;
 use serde::Serialize;
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-};
+use std::{collections::HashMap, fmt::Debug};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -90,9 +87,11 @@ pub fn is_valid_lobby_name(name: &str, max_length: usize) -> bool {
     let n = name.len();
     let non_zero_length = n > 0;
     let under_length_limit = n <= max_length;
-    let lowercase_visible_ascii = name
-        .chars()
-        .all(|c| (c.is_ascii_alphabetic() && c.is_ascii_lowercase()) || c.is_numeric() || c.is_ascii_punctuation());
+    let lowercase_visible_ascii = name.chars().all(|c| {
+        (c.is_ascii_alphabetic() && c.is_ascii_lowercase())
+            || c.is_numeric()
+            || c.is_ascii_punctuation()
+    });
     non_zero_length && under_length_limit && lowercase_visible_ascii
 }
 
@@ -107,7 +106,10 @@ pub struct LobbyMap<T: Serialize + Debug> {
     lobbies: HashMap<String, Lobby<T>>, // keys are lobby name, values are `Lobby` instances
 }
 
-impl <T> Default for LobbyMap<T> where T: Serialize + Debug {
+impl<T> Default for LobbyMap<T>
+where
+    T: Serialize + Debug,
+{
     fn default() -> Self {
         Self {
             lobbies: HashMap::new(),
