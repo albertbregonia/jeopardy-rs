@@ -454,22 +454,29 @@ mod create_lobby_tests {
 mod login_tests {
     use super::*;
     use crate::handlers::player::test_consts::*;
-    use crate::json_websocket::MockReadSocket;
+    use crate::json_websocket::MockSocket;
     use crate::*;
     use tokio::sync::Notify;
 
-    // helper function to create a mock player connection and empty lobby
-    async fn create_test_lobby_and_player_conn() -> PlayerConnection<MockReadSocket<RequestType>> {
+    async fn create_test_player_conn(
+        global_state: Arc<RwLock<GlobalState>>,
+    ) -> (PlayerConnection<MockSocket<RequestType>>, Receiver<String>) {
         let login_request = RequestType::Login {
             username: TEST_USERNAME.to_string(),
             lobby_name: TEST_LOBBY_NAME.to_string(),
             password: TEST_LOBBY_PASSWORD.to_string(),
         };
-        let socket = MockReadSocket { msg: login_request };
+        let (sender, recver) = mpsc::channel(1);
+        let socket = MockSocket {
+            msg: login_request,
+            sender,
+        };
         let json_ws = JsonWebSocket::new(socket);
-        let global_state = Arc::new(RwLock::new(GlobalState::new()));
+        (PlayerConnection::new(global_state.clone(), json_ws), recver)
+    }
 
-        // create test lobby for the test player to join
+    async fn create_test_lobby() -> Arc<RwLock<GlobalState>> {
+        let global_state = Arc::new(RwLock::new(GlobalState::new()));
         global_state
             .write()
             .await
@@ -479,22 +486,21 @@ mod login_tests {
                 TEST_LOBBY_PASSWORD.to_string(),
             ))
             .unwrap();
-
-        PlayerConnection::new(global_state.clone(), json_ws)
+        global_state
     }
 
     #[tokio::test]
     async fn GIVEN_player_conn_WHEN_leave_lobby_THEN_ok() {
         // GIVEN
-        let mut conn = create_test_lobby_and_player_conn().await;
+        let global_state = create_test_lobby().await;
+        let (mut conn, _recvr) = create_test_player_conn(global_state.clone()).await;
         conn.login_loop(1).await.unwrap(); // join the lobby
         // WHEN
         let player = conn.leave_lobby().await.unwrap();
         // THEN
         assert_eq!(player.get_name(), TEST_USERNAME);
         assert!(conn.creds.is_none());
-        let player_not_found_in_lobby = conn
-            .global_state
+        let player_not_found_in_lobby = global_state
             .write()
             .await
             .get_manager()
@@ -508,18 +514,17 @@ mod login_tests {
     #[tokio::test]
     async fn GIVEN_player_conn_not_logged_in_WHEN_leave_lobby_THEN_err() {
         // GIVEN - conn and lobby exist but player not in lobby
-        let mut conn = create_test_lobby_and_player_conn().await;
+        let global_state = create_test_lobby().await;
+        let (mut conn, _recvr) = create_test_player_conn(global_state.clone()).await;
         // WHEN
         let result = conn.leave_lobby().await;
         // THEN
-        assert!(result.is_err());
         assert!(matches!(
             result,
             Err(PlayerHandlerError::Internal(InternalError::UserNotLoggedIn))
         ));
         assert!(conn.creds.is_none());
-        let player_not_found_in_lobby = conn
-            .global_state
+        let player_not_found_in_lobby = global_state
             .write()
             .await
             .get_manager()
@@ -533,7 +538,8 @@ mod login_tests {
     #[tokio::test]
     async fn GIVEN_player_conn_WHEN_login_handler_THEN_ok() {
         // GIVEN
-        let mut conn = create_test_lobby_and_player_conn().await;
+        let global_state = create_test_lobby().await;
+        let (mut conn, _recvr) = create_test_player_conn(global_state.clone()).await;
 
         // WHEN
         let result = conn.login_loop(1).await;
@@ -545,8 +551,7 @@ mod login_tests {
             Some(LoginResponse{username, lobby_name})
                 if username == TEST_USERNAME && lobby_name == TEST_LOBBY_NAME
         ));
-        let player_found_in_lobby = conn
-            .global_state
+        let player_found_in_lobby = global_state
             .write()
             .await
             .get_manager()
@@ -560,7 +565,8 @@ mod login_tests {
     #[tokio::test]
     async fn GIVEN_player_conn_WHEN_login_handler_rejoin_THEN_ok() {
         // GIVEN
-        let mut conn = create_test_lobby_and_player_conn().await;
+        let global_state = create_test_lobby().await;
+        let (mut conn, _recvr) = create_test_player_conn(global_state.clone()).await;
         conn.login_loop(1).await.unwrap(); // join the lobby
         conn.leave_lobby().await.unwrap();
         assert!(conn.creds.is_none());
@@ -585,8 +591,7 @@ mod login_tests {
             Some(LoginResponse{username, lobby_name})
                 if username == TEST_USERNAME && lobby_name == TEST_LOBBY_NAME
         ));
-        let player_found_in_lobby = conn
-            .global_state
+        let player_found_in_lobby = global_state
             .write()
             .await
             .get_manager()
@@ -600,8 +605,8 @@ mod login_tests {
     #[tokio::test]
     async fn GIVEN_player_conn_logged_in_WHEN_lobby_dropped_THEN_ok() {
         // GIVEN
-        let mut conn = create_test_lobby_and_player_conn().await;
-        let global_state = conn.global_state.clone();
+        let global_state = create_test_lobby().await;
+        let (mut conn, _recvr) = create_test_player_conn(global_state.clone()).await;
         let receiver = conn.login_loop(1).await.unwrap();
 
         let notify = Arc::new(Notify::new());
@@ -631,4 +636,27 @@ mod login_tests {
     }
 
     // TODO: negative login tests,
+
+    #[tokio::test]
+    async fn GIVEN_conflicting_player_name_WHEN_login_handler_THEN_err() {
+        // GIVEN
+        let global_state = create_test_lobby().await;
+        let (mut conn1, _recvr) = create_test_player_conn(global_state.clone()).await;
+        conn1.login_loop(1).await.unwrap();
+        // WHEN
+        let (mut conflicting_conn, mut receiver) = create_test_player_conn(global_state).await;
+        let result = conflicting_conn.login_loop(1).await;
+        // THEN
+        assert!(matches!(
+            result,
+            Err(PlayerHandlerError::User(UserError::ExceededAttemptLimit))
+        ));
+        let raw_error = receiver.recv().await.unwrap();
+        let error = serde_json::from_str(&raw_error).unwrap();
+        assert!(matches!(
+            error,
+            PlayerResponse::UserError { error_msg }
+                if error_msg == lobby::UserError::UsernameTaken(TEST_USERNAME.to_string()).to_string()
+        ))
+    }
 }

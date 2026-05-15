@@ -5,6 +5,8 @@ use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
+#[cfg(test)]
+use tokio::sync::mpsc::Sender;
 
 #[derive(Debug, Error)]
 pub enum JsonWebsocketError {
@@ -137,13 +139,16 @@ where
 }
 
 // publicly accessible mock for use in unit tests
+// TODO: we might want to change mock_socket.msg to be another channel in the future
+// that way we can really mock a socket which various requests
 #[cfg(test)]
-pub struct MockReadSocket<T: Serialize> {
+pub struct MockSocket<T: Serialize> {
     pub msg: T,
+    pub sender: Sender<String>,
 }
 
 #[cfg(test)]
-impl<T> TextTransport for MockReadSocket<T>
+impl<T> TextTransport for MockSocket<T>
 where
     T: Serialize,
 {
@@ -152,7 +157,11 @@ where
         Ok(Bytes::from(serialized))
     }
 
-    async fn send_text(&mut self, _msg: &str) -> Result<(), JsonWebsocketError> {
+    async fn send_text(&mut self, msg: &str) -> Result<(), JsonWebsocketError> {
+        self.sender
+            .send(msg.to_string())
+            .await
+            .map_err(|e| InternalError::Underlying(Box::new(e)))?;
         Ok(())
     }
 
@@ -171,9 +180,11 @@ mod tests {
 
     // TODO: unit tests for the axum implementation using mockall
 
+    use tokio::sync::mpsc;
+
     use crate::{
         PlayerRequest,
-        json_websocket::{JsonWebSocket, MockReadSocket},
+        json_websocket::{JsonWebSocket, MockSocket},
     };
 
     #[tokio::test]
@@ -184,7 +195,11 @@ mod tests {
             lobby_name: "test_lobby_name".to_string(),
             password: "test_password".to_string(),
         };
-        let mut mock_ws = JsonWebSocket::<_, _, String>::new(MockReadSocket { msg: request });
+        let (sender, _r) = mpsc::channel(1);
+        let mut mock_ws = JsonWebSocket::<_, _, String>::new(MockSocket {
+            msg: request,
+            sender,
+        });
         // WHEN
         let deserialized = mock_ws.read_json().await.unwrap();
         // THEN
