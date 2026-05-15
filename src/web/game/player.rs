@@ -81,7 +81,9 @@ where
     }
 
     fn validate_free_response(free_response: &str) -> bool {
-        free_response.chars().all(|c| c.is_alphanumeric() || c.is_whitespace())
+        free_response
+            .chars()
+            .all(|c| c.is_alphanumeric() || c.is_whitespace())
     }
 
     pub fn set_free_response(&mut self, free_response: String) -> Result<(), PlayerError<T>> {
@@ -168,9 +170,10 @@ mod player_tests {
         let (sender, _receiver) = mpsc::channel::<u8>(1);
         let mut player = Player::new(TEST_PLAYER_NAME.to_string(), sender);
         // WHEN
-        let result = player.set_free_response(TEST_VALID_FREE_RESPONSE.to_string());
+        player
+            .set_free_response(TEST_VALID_FREE_RESPONSE.to_string())
+            .unwrap();
         // THEN
-        assert!(result.is_ok());
         assert_eq!(player.free_response, TEST_VALID_FREE_RESPONSE);
     }
 }

@@ -136,5 +136,58 @@ where
     }
 }
 
+// publicly accessible mock for use in unit tests
 #[cfg(test)]
-mod tests {}
+pub struct MockReadSocket<T: Serialize> {
+    pub msg: T,
+}
+
+#[cfg(test)]
+impl<T> TextTransport for MockReadSocket<T>
+where
+    T: Serialize,
+{
+    async fn read_text(&mut self) -> Result<Bytes, JsonWebsocketError> {
+        let serialized = serde_json::to_vec(&self.msg).map_err(|e| InternalError::Json(e))?;
+        Ok(Bytes::from(serialized))
+    }
+
+    async fn send_text(&mut self, _msg: &str) -> Result<(), JsonWebsocketError> {
+        Ok(())
+    }
+
+    async fn disconnect(
+        self,
+        _user_error: bool,
+        _msg: Option<&str>,
+    ) -> Result<(), JsonWebsocketError> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(non_snake_case)]
+mod tests {
+
+    // TODO: unit tests for the axum implementation using mockall
+
+    use crate::{
+        PlayerRequest,
+        json_websocket::{JsonWebSocket, MockReadSocket},
+    };
+
+    #[tokio::test]
+    async fn GIVEN_json_string_WHEN_read_json_THEN_ok() {
+        // GIVEN
+        let request = PlayerRequest::Login {
+            username: "test_username".to_string(),
+            lobby_name: "test_lobby_name".to_string(),
+            password: "test_password".to_string(),
+        };
+        let mut mock_ws = JsonWebSocket::<_, _, String>::new(MockReadSocket { msg: request });
+        // WHEN
+        let deserialized = mock_ws.read_json().await.unwrap();
+        // THEN
+        assert!(matches!(deserialized, PlayerRequest::Login { .. }));
+    }
+}

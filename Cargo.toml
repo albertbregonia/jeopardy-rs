@@ -8,6 +8,7 @@ tokio = { version = "*", features = ["full"] }
 anyhow = "*"
 thiserror = "*"
 async-trait = "*"
+# mockall = "*"
 
 # json
 serde = { version = "*", features = ["derive", "rc"] }

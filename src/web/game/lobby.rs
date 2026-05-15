@@ -50,7 +50,7 @@ where
 
     pub fn is_correct_password(&self, password: &str) -> bool {
         // NOTE: this should normally be a hash for security,
-        // but since this is NOT prod, plaintext is fine.
+        // but since lobbies are ephemeral, this is fine
         self.password == password
     }
 
@@ -103,7 +103,9 @@ mod lobby_tests {
     fn create_test_player<T: Serialize + Debug>(name: &str) -> Player<T> {
         let (sender, _receiver) = mpsc::channel(1);
         let mut player = Player::new(name.to_string(), sender);
-        player.set_free_response(TEST_PLAYER_FREE_RESPONSE.to_string()).unwrap();
+        player
+            .set_free_response(TEST_PLAYER_FREE_RESPONSE.to_string())
+            .unwrap();
         player.set_points(TEST_PLAYER_POINTS);
         player.set_wager(TEST_PLAYER_WAGER).unwrap();
         player
