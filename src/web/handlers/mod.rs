@@ -16,7 +16,7 @@ pub mod host;
 pub mod player;
 
 // TODO: make the following values configurable via a JSON config
-pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
+pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(60);
 pub const MAX_NAME_LENGTH: usize = 32;
 pub const MAX_LOGIN_ATTEMPTS: usize = 3;
 

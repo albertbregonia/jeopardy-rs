@@ -456,7 +456,9 @@ mod login_tests {
     use crate::handlers::player::test_consts::*;
     use crate::json_websocket::MockSocket;
     use crate::*;
+    use bytes::Bytes;
     use tokio::sync::Notify;
+    use tokio::time::sleep;
 
     async fn create_test_player_conn(
         global_state: Arc<RwLock<GlobalState>>,
@@ -651,6 +653,7 @@ mod login_tests {
             result,
             Err(PlayerHandlerError::User(UserError::ExceededAttemptLimit))
         ));
+        // ensure errors are sent back
         let raw_error = receiver.recv().await.unwrap();
         let error = serde_json::from_str(&raw_error).unwrap();
         assert!(matches!(
@@ -658,5 +661,55 @@ mod login_tests {
             PlayerResponse::UserError { error_msg }
                 if error_msg == lobby::UserError::UsernameTaken(TEST_USERNAME.to_string()).to_string()
         ))
+    }
+
+    struct ReadTimeoutSocket {
+        duration: Duration,
+    }
+    impl TextTransport for ReadTimeoutSocket {
+        async fn read_text(&mut self) -> Result<Bytes, JsonWebsocketError> {
+            sleep(self.duration).await;
+            Ok(Bytes::new())
+        }
+        async fn send_text(&mut self, _msg: &str) -> Result<(), JsonWebsocketError> {
+            Ok(())
+        }
+        async fn disconnect(
+            self,
+            _user_error: bool,
+            _msg: Option<&str>,
+        ) -> Result<(), JsonWebsocketError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    // #[cfg(feature="login-timeout-test")]
+    async fn GIVEN_timeout_player_conn_WHEN_login_handler_THEN_err() {
+        // GIVEN
+        let global_state = create_test_lobby().await;
+        let duration = LOGIN_TIMEOUT + Duration::from_secs(1);
+        let timeout_socket = ReadTimeoutSocket { duration };
+        let json_ws = JsonWebSocket::new(timeout_socket);
+        let mut conn = PlayerConnection::new(global_state.clone(), json_ws);
+
+        // WHEN
+        let result = conn.login_loop(1).await;
+
+        // THEN
+        assert!(matches!(
+            result,
+            Err(PlayerHandlerError::User(UserError::RequestTimeout(..)))
+        ));
+        assert!(conn.creds.is_none());
+        let player_not_found_in_lobby = global_state
+            .write()
+            .await
+            .get_manager()
+            .get(TEST_LOBBY_NAME)
+            .unwrap()
+            .get_player(TEST_USERNAME)
+            .is_err();
+        assert!(player_not_found_in_lobby)
     }
 }
