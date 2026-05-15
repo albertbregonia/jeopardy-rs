@@ -377,7 +377,7 @@ mod create_lobby_tests {
     }
 
     #[tokio::test]
-    async fn GIVEN_invalid_create_lobby_request_WHEN_create_lobby_THEN_err() {
+    async fn GIVEN_invalid_lobby_name_create_lobby_request_WHEN_create_lobby_THEN_err() {
         // GIVEN
         let request = RequestType::CreateLobby {
             lobby_name: "".to_string(), // invalid lobby name
@@ -385,9 +385,25 @@ mod create_lobby_tests {
         };
         let global_state = Arc::new(RwLock::new(GlobalState::new()));
         // WHEN
-        let (status, _msg) = create_lobby(State(global_state), Json(request)).await;
+        let (status, msg) = create_lobby(State(global_state), Json(request)).await;
         // THEN
         assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(msg.contains("Invalid lobby name."));
+    }
+
+    #[tokio::test]
+    async fn GIVEN_invalid_lobby_password_create_lobby_request_WHEN_create_lobby_THEN_err() {
+        // GIVEN
+        let request = RequestType::CreateLobby {
+            lobby_name: TEST_LOBBY_NAME.to_string(), // invalid lobby name
+            password: "".to_string(),
+        };
+        let global_state = Arc::new(RwLock::new(GlobalState::new()));
+        // WHEN
+        let (status, msg) = create_lobby(State(global_state), Json(request)).await;
+        // THEN
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(msg.contains("Invalid password."));
     }
 
     #[tokio::test]
@@ -401,6 +417,36 @@ mod create_lobby_tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(msg, "Malformed create lobby request");
     }
+
+    #[tokio::test]
+    async fn GIVEN_existing_lobby_WHEN_create_lobby_THEN_err() {
+        // GIVEN
+        let request = RequestType::CreateLobby {
+            lobby_name: TEST_LOBBY_NAME.to_string(),
+            password: TEST_LOBBY_PASSWORD.to_string(),
+        };
+        let global_state = Arc::new(RwLock::new(GlobalState::new()));
+        let (status, msg) = create_lobby(State(global_state.clone()), Json(request.clone())).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            msg,
+            format!("Lobby '{TEST_LOBBY_NAME}' created successfully.")
+        );
+        // WHEN
+        let (status, msg) = create_lobby(State(global_state), Json(request)).await;
+        // THEN
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            msg,
+            LobbyManagerError::User(lobby_manager::UserError::LobbyAlreadyExists(
+                TEST_LOBBY_NAME.to_string()
+            ))
+            .to_string()
+        )
+    }
+
+    // TODO: these tests do not handle internal server error from LobbyManager
+    // (but LobbyMap doesn't ever actually return one so we'll have to mock somehow)
 }
 
 #[cfg(test)]
@@ -528,7 +574,7 @@ mod login_tests {
             .get_player(TEST_USERNAME)
             .is_err();
         assert!(player_not_found_in_lobby);
-        
+
         // WHEN
         let result = conn.login_loop(1).await; // connection is reused
 
