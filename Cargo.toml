@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = [ "jeopardy-rs", "stagecrew" ]
+
+[workspace.dependencies]
+tokio = { version = "*", features = ["full"] }
+anyhow = "*"
+thiserror = "*"
+
+rand = "*" # daily double generation
+uuid = { version = "*", features = ["v4"]} # request ids
+
+# json
+serde = { version = "*", features = ["derive", "rc"] }
+serde_json = "*"
+
+# web server
+axum = { version = "*", features = ["ws", "macros"] }
+futures-util = "*"
+tower-http = { version = "*", features = ["fs"] }
+bytes = "*" # used internally by axum
+
+# logging
+tracing = "*"
+tracing-subscriber = "*"
