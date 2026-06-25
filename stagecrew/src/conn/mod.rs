@@ -258,7 +258,7 @@ mod json_conn_tests {
         // GIVEN
         let (mut mock_ws, input_sender, _) = new_mock_conn_with_io_hooks();
         // this doesn't serialize in MockConn so it errors in read_text()
-        input_sender.send(TestType::VariantB(true)).await.unwrap(); 
+        input_sender.send(TestType::VariantB(true)).await.unwrap();
 
         // WHEN
         let result = mock_ws.read_json().await.unwrap();
@@ -272,7 +272,7 @@ mod json_conn_tests {
         // GIVEN
         let (mut mock_ws, input_sender, _) = new_mock_conn_with_io_hooks();
         // this should serialize but not deserialize so it fails in read_json()
-        input_sender.send(TestType::VariantB(false)).await.unwrap(); 
+        input_sender.send(TestType::VariantB(false)).await.unwrap();
 
         // WHEN
         let result = mock_ws.read_json().await.unwrap();
