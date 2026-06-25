@@ -1,0 +1,18 @@
+[package]
+name = "stagecrew"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# optional; enabled with the feature for axum impl of JsonConn
+axum = { workspace = true, features = ["ws"], optional = true }
+bytes = { workspace = true, optional = true } # used internally by axum
+futures-util = { workspace = true, optional = true }
+
+[features]
+axum = ["dep:axum", "dep:futures-util", "dep:bytes"]

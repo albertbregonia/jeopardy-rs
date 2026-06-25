@@ -1,0 +1,4 @@
+{
+    // "Run Test" hint from rust analyzer may not compile with features 
+    "rust-analyzer.cargo.allFeatures": true
+}
