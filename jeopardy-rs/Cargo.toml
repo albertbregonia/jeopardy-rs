@@ -27,3 +27,6 @@ tower-http.workspace = true
 # logging
 tracing = "*"
 tracing-subscriber = "*"
+
+[dev-dependencies]
+stagecrew = { path = "../stagecrew", features = ["test-util"] }

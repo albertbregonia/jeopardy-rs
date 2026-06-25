@@ -66,4 +66,6 @@ impl TextTransport for WebSocket {
 }
 
 #[cfg(test)]
-mod axum_tests {}
+mod axum_tests {
+    // TODO: unit tests
+}

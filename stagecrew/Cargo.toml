@@ -16,3 +16,4 @@ futures-util = { workspace = true, optional = true }
 
 [features]
 axum = ["dep:axum", "dep:futures-util", "dep:bytes"]
+test-util = [] # expose test variants for our abstractions

@@ -26,6 +26,7 @@ pub struct Lobby<G: Game> {
     // and there are no clones of it,
     // the actor will be signaled to shutdown
     // after processing its last queued message
+    // (no new messages will be queued)
     lobby_handle: mpsc::Sender<Command<G>>,
 }
 
@@ -175,7 +176,7 @@ impl<G: Game> ActorLobby<G> {
 }
 
 #[cfg(test)]
-mod lobby_test_constructs {
+pub mod lobby_test_constructs {
     use crate::player::{Player, player_map::PlayerMap};
 
     use super::*;
@@ -226,8 +227,13 @@ mod lobby_tests {
 
     #[tokio::test]
     pub async fn GIVEN_lobby_WHEN_shutdown_THEN_ok() {
+        // GIVEN
         let lobby = Lobby::new(TestGame::default(), PlayerMap::new(), 1);
+
+        // WHEN
         let handle = lobby.shutdown().await.unwrap();
+
+        // THEN
         assert_eq!(lobby.is_shutdown(), false); // lobby.shutdown() just sends the signal
         handle.await.unwrap(); // wait until actually shut down
         assert_eq!(lobby.is_shutdown(), true);
@@ -242,12 +248,48 @@ mod lobby_tests {
         // it's better to rely on shutdown although it has been documented that
         // since Lobby{} holds the only publisher handle to the actor (and is private and cannot be cloned)
         // dropping Lobby and the publisher handle closes the subscriber, signaling the actor to shutdown
+
+        // GIVEN
         let lobby = Lobby::new(TestGame::default(), PlayerMap::new(), 2);
+
+        // WHEN
         let handle1 = lobby.shutdown().await.unwrap();
         let handle2 = lobby.shutdown().await.unwrap();
+
+        // THEN
         handle1.await.unwrap();
         assert!(lobby.is_shutdown());
-        assert!(handle2.await.is_err());
+        assert!(matches!(
+            handle2.await.map_err(|e| e.into()),
+            Err(LobbyError::ActorShutdown)
+        ));
+    }
+
+    #[tokio::test]
+    pub async fn GIVEN_already_shutdown_lobby_WHEN_send_event_THEN_error() {
+        // GIVEN
+        let lobby = Lobby::new(TestGame::default(), PlayerMap::new(), 2);
+        let handle1 = lobby.shutdown().await.unwrap();
+        handle1.await.unwrap();
+        assert!(lobby.is_shutdown());
+
+        // WHEN - all of these should fail bc the actor is shut down
+        // to be exhaustive, we should test that every command fails
+        // but this suffices as they all share the same helper
+        let shutdown_result = lobby.shutdown().await;
+        let player_count_result = lobby.player_count().await;
+        let remove_player_result = lobby.remove_player("".to_string()).await;
+
+        // THEN
+        assert!(matches!(shutdown_result, Err(LobbyError::ActorShutdown)));
+        assert!(matches!(
+            player_count_result,
+            Err(LobbyError::ActorShutdown)
+        ));
+        assert!(matches!(
+            remove_player_result,
+            Err(LobbyError::ActorShutdown)
+        ));
     }
 
     // moved to a helper because some operations require a player

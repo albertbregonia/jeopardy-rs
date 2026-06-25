@@ -13,7 +13,6 @@ pub trait Player: Send + 'static {
 /// It should just have some sort of trait to get players.
 /// Therefore, Read/WritePlayers are traits to abstract interfacing with the data structure.
 /// Consequently, `Game` manages the players' data but the `Lobby` manages the players
-
 // yes - it does need to be reimplemented per data structure (bad)
 // TODO: evaluate if there is a stdlib way / existing trait
 pub trait ReadPlayers<P: Player>: Send + 'static {
