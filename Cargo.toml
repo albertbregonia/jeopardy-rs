@@ -1,21 +1,21 @@
-[package]
-name = "jeopardy"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+resolver = "3"
+members = [ "jeopardy-rs", "stagecrew" ]
 
-[dependencies]
+[workspace.dependencies]
 tokio = { version = "*", features = ["full"] }
 anyhow = "*"
 thiserror = "*"
-async-trait = "*"
-# mockall = "*"
+
+rand = "*" # daily double generation
+uuid = { version = "*", features = ["v4"]} # request ids
 
 # json
 serde = { version = "*", features = ["derive", "rc"] }
 serde_json = "*"
 
 # web server
-axum = { version = "*", features = ["ws"] }
+axum = { version = "*", features = ["ws", "macros"] }
 futures-util = "*"
 tower-http = { version = "*", features = ["fs"] }
 bytes = "*" # used internally by axum
@@ -23,6 +23,3 @@ bytes = "*" # used internally by axum
 # logging
 tracing = "*"
 tracing-subscriber = "*"
-
-[features]
-# login-timeout-test = []

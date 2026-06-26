@@ -1,0 +1,32 @@
+[package]
+name = "jeopardy-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+stagecrew = { path = "../stagecrew", features = ["axum"] }
+tokio.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+
+# daily double generation
+rand.workspace = true
+
+# request ids
+uuid.workspace = true
+
+# json
+serde.workspace = true
+serde_json.workspace = true
+
+# web server
+axum.workspace = true
+futures-util.workspace = true
+tower-http.workspace = true
+
+# logging
+tracing = "*"
+tracing-subscriber = "*"
+
+[dev-dependencies]
+stagecrew = { path = "../stagecrew", features = ["test-util"] }
