@@ -49,7 +49,6 @@ impl CredsValidator for NonZeroAsciiValidator {
 mod nonzero_ascii_tests {
     use crate::web::handlers::validators::{CredsValidator, nonzero_ascii::NonZeroAsciiValidator};
 
-
     const TEST_MAX_NAME_LENGTH: usize = 32;
 
     #[test]
@@ -61,14 +60,15 @@ mod nonzero_ascii_tests {
                 0 => "a".repeat(TEST_MAX_NAME_LENGTH), // max length test
                 1 => "abcdefghijklmnopqrstuvwxyz".to_string(), // lowercase test
                 2 => "ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string(), // uppercase test
-                3 => "a12345678910_".to_string(), // special char test
-                _ => { // combo test
+                3 => "a12345678910_".to_string(),      // special char test
+                _ => {
+                    // combo test
                     let mut s = "this_IS_a_C0MB1N@T10nAAaa[]{}!!!".to_string();
                     while s.len() != TEST_MAX_NAME_LENGTH {
                         s.push('a');
                     }
                     s
-                },
+                }
             };
             // WHEN / THEN
             assert!(validator.is_valid_lobby_id(&test_str));
@@ -84,17 +84,19 @@ mod nonzero_ascii_tests {
         let validator = NonZeroAsciiValidator::new(TEST_MAX_NAME_LENGTH);
         for i in 0..5 {
             let test_str = match i {
-                0 => "".to_string(), // empty string
+                0 => "".to_string(),                       // empty string
                 1 => "a".repeat(TEST_MAX_NAME_LENGTH + 1), // > max length
-                2 => "💀".to_string(), // non ascii
-                3 => "\t".to_string(), // non-visible ascii
-                _ => { // combo test
+                2 => "💀".to_string(),                     // non ascii
+                3 => "\t".to_string(),                     // non-visible ascii
+                _ => {
+                    // combo test
                     let mut s = "this_IS_a_C0MB1N@T10nAAaa[]{}!!!".to_string();
-                    while s.len() != TEST_MAX_NAME_LENGTH+1 { // go over max length
+                    while s.len() != TEST_MAX_NAME_LENGTH + 1 {
+                        // go over max length
                         s.push(' '); // add whitespace
                     }
                     s
-                },
+                }
             };
             // WHEN / THEN
             assert_eq!(validator.is_valid_lobby_id(&test_str), false);
