@@ -3,14 +3,14 @@ use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use thiserror::Error;
 
-use crate::conn::TextTransport;
+use crate::conn::{ErrorReason, TextTransport};
 
 #[derive(Debug, Error)]
 pub enum AxumTextTransportError {
     #[error(transparent)]
     Axum(#[from] axum::Error),
     #[error("Received non-text message when expecting text on WebSocket: {0:?}")]
-    NonTextMessageReceived(Message),
+    UnexpectedMessageReceived(Message),
 }
 
 impl TextTransport for WebSocket {
@@ -28,8 +28,10 @@ impl TextTransport for WebSocket {
         };
         match raw_msg {
             Message::Text(utf8_bytes) => Some(Ok(utf8_bytes.into())),
-            Message::Close(_) => None, // if we get a close message, clean disconnect
-            other => Some(Err(AxumTextTransportError::NonTextMessageReceived(other))),
+            Message::Close(_) => None, // axum internally echoes Message::Close, we simply want to propagate the None to JsonConn
+            other => Some(Err(AxumTextTransportError::UnexpectedMessageReceived(
+                other,
+            ))),
         }
     }
 
@@ -39,12 +41,14 @@ impl TextTransport for WebSocket {
         Ok(())
     }
 
-    async fn disconnect(
-        mut self,
-        internal_error: bool,
-        msg: Option<&str>,
-    ) -> Result<(), Self::Error> {
-        if let Some(msg) = msg {
+    async fn disconnect(mut self, reason: Option<ErrorReason>) -> Result<(), Self::Error> {
+        if let Some(ErrorReason {
+            internal_error,
+            reason,
+        }) = reason
+        {
+            // axum doesn't provide this granular control over the close frame
+            // so we re-implement it here
             let code = if internal_error {
                 close_code::ERROR
             } else {
@@ -52,20 +56,21 @@ impl TextTransport for WebSocket {
             };
             let close_msg = Message::Close(Some(CloseFrame {
                 code,
-                reason: msg.into(),
+                reason: reason.into(),
             }));
             self.send(close_msg)
                 .await
                 .map_err(AxumTextTransportError::Axum)?;
+            // then drop to disconnect
+        } else {
+            self.close().await.map_err(AxumTextTransportError::Axum)?;
         }
-        // spec-wise this should wait for the close frame response but it's fine to close() here
-        // this function consumes `self` and drops the connection either way
-        self.close().await.map_err(AxumTextTransportError::Axum)?;
+        // we don't wait for a close frame here bc that may induce a soft lock
+        // which requires use to then think about timeouts, etc.
         Ok(())
     }
 }
 
-#[cfg(test)]
-mod axum_tests {
-    // TODO: unit tests
-}
+// NOTE: axum defines the canonical way to "unit test" is simply to use the futures util split()
+// as using the trait will allow us to use something like mpsc::channel() in place of an actual websocket.
+// i can't do this in my case so we'll rely on an integ test instead

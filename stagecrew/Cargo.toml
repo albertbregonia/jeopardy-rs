@@ -17,3 +17,8 @@ futures-util = { workspace = true, optional = true }
 [features]
 axum = ["dep:axum", "dep:futures-util", "dep:bytes"]
 test-util = [] # expose test variants for our abstractions
+
+[dev-dependencies]
+tokio-tungstenite = "*" # for axum integ test
+# integ tests are treated as separate crate so we need to reimport ourselves with features
+stagecrew = { path = ".", features = ["axum"] }

@@ -757,8 +757,10 @@ dependencies = [
  "futures-util",
  "serde",
  "serde_json",
+ "stagecrew",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

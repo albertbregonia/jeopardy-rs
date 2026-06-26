@@ -41,7 +41,10 @@ pub mod password_protected_lobby_test_constructs {
         player::player_map::PlayerMap,
     };
 
-    pub fn new_test_password_protected_lobby(id: String, password: String) -> PasswordProtectedLobby<TestGame> {
+    pub fn new_test_password_protected_lobby(
+        id: String,
+        password: String,
+    ) -> PasswordProtectedLobby<TestGame> {
         let lobby = Lobby::new(TestGame::default(), PlayerMap::new(), 1);
         PasswordProtectedLobby::new(id.clone(), password, lobby)
     }
@@ -50,7 +53,9 @@ pub mod password_protected_lobby_test_constructs {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod password_lobby_tests {
-    use crate::manager::{ManagerEntry, password_protected_lobby_test_constructs::new_test_password_protected_lobby};
+    use crate::manager::{
+        ManagerEntry, password_protected_lobby_test_constructs::new_test_password_protected_lobby,
+    };
 
     #[tokio::test]
     async fn GIVEN_pw_lobby_WHEN_check_password_THEN_ok() {
@@ -69,7 +74,7 @@ mod password_lobby_tests {
     async fn GIVEN_pw_lobby_WHEN_get_lobby_THEN_ok() {
         // pw lobby is just a simple wrapper
         // ensure we can get access to the underlying lobby
-        // lowk a "test for testing" 
+        // lowk a "test for testing"
         // but we're testing the concrete type matches the trait expectation
         let lobby = new_test_password_protected_lobby("1".to_string(), "".to_string());
         assert_eq!(lobby.lobby().is_shutdown(), false);

@@ -1,6 +1,6 @@
 // helper struct to induce failures in a manager for testing
-// it is a thin wrapper around MapManager with a counter 
-// to induce failure after n manager operations 
+// it is a thin wrapper around MapManager with a counter
+// to induce failure after n manager operations
 #[cfg(feature = "test-util")]
 pub mod test_manager_constructs {
     use std::sync::Mutex;
@@ -115,8 +115,8 @@ pub mod test_manager_constructs {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test_manager_tests {
-    use crate::manager::{ManagerEntry, ManagerError};
     use crate::manager::password_protected_lobby_test_constructs::new_test_password_protected_lobby;
+    use crate::manager::{ManagerEntry, ManagerError};
     use crate::{
         lobby::lobby_test_constructs::TestGame,
         manager::{Manager, PasswordProtectedLobby, test_manager_constructs::TestManager},
@@ -127,18 +127,15 @@ mod test_manager_tests {
         // GIVEN
         let mut manager = TestManager::<PasswordProtectedLobby<TestGame>>::default();
         manager.set_always_fail(); // every operation should fail
-        
+
         // WHEN / THEN
+        assert!(matches!(manager.has(""), Err(ManagerError::Dependency(..))));
+        assert!(matches!(manager.get(""), Err(ManagerError::Dependency(..))));
         assert!(matches!(
-            manager.has(""),
-            Err(ManagerError::Dependency(..))
-        ));
-        assert!(matches!(
-            manager.get(""),
-            Err(ManagerError::Dependency(..))
-        ));
-        assert!(matches!(
-            manager.add("", new_test_password_protected_lobby("".to_string(), "".to_string())),
+            manager.add(
+                "",
+                new_test_password_protected_lobby("".to_string(), "".to_string())
+            ),
             Err(ManagerError::Dependency(..))
         ));
         assert!(matches!(
@@ -155,10 +152,13 @@ mod test_manager_tests {
         manager.set_fail_after_n(n);
 
         // WHEN
-        for _ in 0..n/3 {
+        for _ in 0..n / 3 {
             // these should all pass normally
             assert!(matches!(
-                manager.add("", new_test_password_protected_lobby("".to_string(), "".to_string())),
+                manager.add(
+                    "",
+                    new_test_password_protected_lobby("".to_string(), "".to_string())
+                ),
                 Ok(())
             ));
             assert!(matches!(manager.has(""), Ok(..)));
@@ -169,10 +169,7 @@ mod test_manager_tests {
         }
 
         // THEN
-        assert!(matches!(
-            manager.has(""),
-            Err(ManagerError::Dependency(..))
-        ));
+        assert!(matches!(manager.has(""), Err(ManagerError::Dependency(..))));
     }
 
     #[tokio::test]
@@ -189,15 +186,12 @@ mod test_manager_tests {
             manager.set_fail_after_n(n);
             for _ in 0..n {
                 assert!(matches!(
-                    manager.get(""), 
+                    manager.get(""),
                     Ok(entry) if entry.id() == ""
                 ));
             }
             // THEN
-            assert!(matches!(
-                manager.get(""),
-                Err(ManagerError::Dependency(..))
-            ));
+            assert!(matches!(manager.get(""), Err(ManagerError::Dependency(..))));
             // WHEN
             manager.reset(); // this should allow the loop to run twice, internal counter is reset
         }

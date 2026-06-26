@@ -30,6 +30,12 @@ where
     transport: T,
 }
 
+#[derive(Debug, Clone)]
+pub struct ErrorReason {
+    pub internal_error: bool,
+    pub reason: String,
+}
+
 // we use `impl Future<>` instead of `async fn` as per compiler suggestion / backwards compatibility
 pub trait TextTransport {
     type Error: Error + 'static;
@@ -37,8 +43,7 @@ pub trait TextTransport {
     fn send_text(&mut self, msg: &str) -> impl Future<Output = Result<(), Self::Error>>;
     fn disconnect(
         self,
-        internal_error: bool,
-        msg: Option<&str>,
+        reason: Option<ErrorReason>,
     ) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
@@ -79,15 +84,11 @@ where
             .map_err(|e| JsonConnError::Dependency(e.into()))
     }
 
-    pub async fn disconnect(
-        self,
-        internal_error: bool,
-        msg: Option<&str>,
-    ) -> Result<(), JsonConnError> {
+    pub async fn disconnect(self, reason: Option<ErrorReason>) -> Result<(), JsonConnError> {
         // NOTE: this consumes the object (effectively dropping the underlying socket)
         // this is also just a re-export of TextTransport disconnect
         self.transport
-            .disconnect(internal_error, msg)
+            .disconnect(reason)
             .await
             .map_err(|e| JsonConnError::Dependency(e.into()))?;
         Ok(())
@@ -134,15 +135,11 @@ mod json_conn_test_constructs {
             Ok(())
         }
 
-        async fn disconnect(
-            self,
-            internal_error: bool,
-            _msg: Option<&str>,
-        ) -> Result<(), Self::Error> {
+        async fn disconnect(self, reason: Option<ErrorReason>) -> Result<(), Self::Error> {
             // receiver and sender will be dropped automatically
 
             // internal error is only used here to induce an error
-            if internal_error {
+            if reason.is_some() {
                 Err(MockError::Generic)
             } else {
                 Ok(())
@@ -319,7 +316,7 @@ mod json_conn_tests {
         let (mock_ws, _, _) = new_mock_conn_with_io_hooks();
 
         // WHEN
-        let result = mock_ws.disconnect(false, None).await;
+        let result = mock_ws.disconnect(None).await;
 
         // THEN
         assert!(matches!(result, Ok(())));
@@ -331,7 +328,11 @@ mod json_conn_tests {
         let (mock_ws, _, _) = new_mock_conn_with_io_hooks();
 
         // WHEN
-        let result = mock_ws.disconnect(true, None).await;
+        let reason = Some(ErrorReason {
+            internal_error: true,
+            reason: "".to_string(),
+        });
+        let result = mock_ws.disconnect(reason).await;
 
         // THEN
         assert!(matches!(result, Err(JsonConnError::Dependency(..))));
