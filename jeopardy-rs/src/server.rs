@@ -6,9 +6,17 @@ use stagecrew::manager::{Manager, MapManager, PasswordProtectedLobby};
 use tokio::{fs, sync::RwLock};
 
 use crate::{
-    game::jeopardy::Jeopardy,
+    game::Jeopardy,
     web::handlers::validators::{CredsValidator, nonzero_ascii::NonZeroAsciiValidator},
 };
+
+/// helper trait to allow for creating a default variant
+/// of a struct to be used for testing
+/// - keeps tests clean and idiomatic
+#[cfg(test)]
+pub trait TestDefault {
+    fn test_default() -> Self;
+}
 
 pub const JSON_CONFIG_PATH_KEY: &str = "CONFIG_PATH";
 pub const JSON_CONFIG_DEFAULT_PATH: &str = "./config.json";
@@ -47,10 +55,12 @@ impl ServerConfig {
         let path = env::var(JSON_CONFIG_PATH_KEY).unwrap_or(JSON_CONFIG_DEFAULT_PATH.to_string());
         Self::from_json_path(&path).await
     }
+}
 
-    #[cfg(test)]
+#[cfg(test)]
+impl TestDefault for ServerConfig {
     // absurdly small, unreasonble values, created for testing
-    fn test_config() -> Self {
+    fn test_default() -> Self {
         Self {
             max_timeout: Duration::from_secs(1),
             max_retry: 3,

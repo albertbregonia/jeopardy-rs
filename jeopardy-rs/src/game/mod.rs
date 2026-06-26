@@ -1,5 +1,8 @@
 use thiserror::Error;
 
+mod handler;
+pub use handler::*;
+
 pub mod jeopardy;
 mod player;
 
