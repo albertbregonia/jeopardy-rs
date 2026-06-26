@@ -52,12 +52,12 @@ where
 
 /// given a Fn that represents the tests to run on the server-side when a JsonConn is created,
 /// create a single-use websocket server along with a client and an mpsc::Receiver<>
-/// 
+///
 /// for each test, the client websocket sends messages to the server,
 /// the server constructs the JsonConn and passes it to the test Fn.
 /// any panic!()s (eg. by assert!(..) or unwrap(..), etc.)
 /// get returned to the tokio::test over the mpsc::Receiver<> so that the test can fail
-/// 
+///
 /// tl;dr this integ test harness is a lot of passing between threads
 /// so that the tests can act as both the server and the client to test for errors
 async fn setup_websocket_client_and_server<F, Fut>(
@@ -191,10 +191,7 @@ async fn GIVEN_test_type_WHEN_send_json_THEN_ok() {
     // GIVEN
     let (mut ws, mut rx) = setup_websocket_client_and_server(|mut json_conn| async move {
         // THEN
-        assert!(matches!(
-            json_conn.send_json(&TestType).await,
-            Ok(())
-        ));
+        assert!(matches!(json_conn.send_json(&TestType).await, Ok(())));
     })
     .await;
 
@@ -251,7 +248,7 @@ async fn GIVEN_internal_error_reason_WHEN_disconnect_THEN_ok() {
     // THEN
     assert!(matches!(
         ws.next().await,
-        Some(Ok(Message::Close(Some(CloseFrame { code, reason })))) 
+        Some(Ok(Message::Close(Some(CloseFrame { code, reason }))))
             if code == CloseCode::Error && reason == expected_reason
     ));
 
@@ -280,7 +277,7 @@ async fn GIVEN_user_error_reason_WHEN_disconnect_THEN_ok() {
     // THEN
     assert!(matches!(
         ws.next().await,
-        Some(Ok(Message::Close(Some(CloseFrame { code, reason })))) 
+        Some(Ok(Message::Close(Some(CloseFrame { code, reason }))))
             if code == CloseCode::Invalid && reason == expected_reason
     ));
 
