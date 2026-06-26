@@ -1,0 +1,13 @@
+{
+    "max_timeout": {
+        "secs": 300,
+        "nanos": 0
+    },
+    "max_retry": 3,
+    "max_username_length": 32,
+    "player_channel_buffer_size": 128,
+    "lobby_cleanup_grace_period": {
+        "secs": 300,
+        "nanos": 0
+    }
+}
