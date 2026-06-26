@@ -2,10 +2,10 @@ use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 
 pub mod board;
+pub mod board_question;
 pub mod category;
 pub mod config;
 pub mod final_jeopardy;
-pub mod jeopardy_question;
 pub mod question;
 
 // constructs for the Jeopardy game such as Board, Questions, Categories, etc

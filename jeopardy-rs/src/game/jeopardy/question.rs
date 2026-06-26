@@ -1,9 +1,9 @@
-// defines a simple `Question` as a pair of strings
-// one for the question content and the corresponding answer
-// this way, no Question ever goes without an answer
 use crate::game::jeopardy::{JeopardyBoardError, non_empty_trimmed};
 use serde::{Deserialize, Serialize};
 
+/// Defines a simple `Question` as a pair of strings
+/// one for the question content and the corresponding answer
+/// This way, no Question ever goes without an answer
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Question {
     #[serde(deserialize_with = "non_empty_trimmed")]
