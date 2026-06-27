@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use super::{Player, ReadPlayers, WritePlayers};
+use super::{Player, ReadPlayerCollection, WritePlayerCollection};
 
-// implementation of ReadPlayers / WritePlayers traits for a HashMap
+// implementation of ReadPlayerCollection / WritePlayerCollection traits for a HashMap
 
 #[derive(Default)]
 pub struct PlayerMap<P: Player> {
@@ -23,7 +23,7 @@ impl<P: Player> From<HashMap<String, P>> for PlayerMap<P> {
     }
 }
 
-impl<P: Player> ReadPlayers<P> for PlayerMap<P> {
+impl<P: Player> ReadPlayerCollection<P> for PlayerMap<P> {
     fn contains(&self, id: &str) -> bool {
         self.map.contains_key(id)
     }
@@ -49,7 +49,7 @@ impl<P: Player> ReadPlayers<P> for PlayerMap<P> {
     }
 }
 
-impl<P: Player> WritePlayers<P> for PlayerMap<P> {
+impl<P: Player> WritePlayerCollection<P> for PlayerMap<P> {
     fn add(&mut self, id: String, player: P) -> Option<P> {
         self.map.insert(id, player)
     }

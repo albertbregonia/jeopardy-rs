@@ -4,7 +4,7 @@ pub use actor_lobby::*;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::player::{Player, ReadPlayers, WritePlayers};
+use crate::player::{Player, ReadPlayerCollection, WritePlayerCollection};
 
 // just a type alias to stop having to type this everywhere
 pub type Responder<T> = oneshot::Sender<T>;
@@ -21,7 +21,7 @@ pub trait Game: Send + 'static {
     // lowk Collection shouldn't be here and should be abstracted at the lobby level
     // bc the game doesn't NEED to know how the players are collected, they just need a ref to players
     // but writing <G:Game, P: ReadPlayers<Game::Player> + WritePlayers<Game::Player>> everywhere in lobby is not as clean
-    type Collection: ReadPlayers<Self::Player> + WritePlayers<Self::Player>;
+    type Collection: ReadPlayerCollection<Self::Player> + WritePlayerCollection<Self::Player>;
 
     type Player: Player;
     type Event: Send;
@@ -29,7 +29,8 @@ pub trait Game: Send + 'static {
 
     fn handle_event(
         &mut self,
-        players: &mut dyn ReadPlayers<Self::Player>,
+        // may seem contradictory, &mut allows the players to be mutable but not the collection
+        players: &mut dyn ReadPlayerCollection<Self::Player>,
         event: Self::Event,
     ) -> Self::EventResponse;
 

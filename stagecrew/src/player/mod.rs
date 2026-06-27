@@ -15,7 +15,7 @@ pub trait Player: Send + 'static {
 /// Consequently, `Game` manages the players' data but the `Lobby` manages the players
 // yes - it does need to be reimplemented per data structure (bad)
 // TODO: evaluate if there is a stdlib way / existing trait
-pub trait ReadPlayers<P: Player>: Send + 'static {
+pub trait ReadPlayerCollection<P: Player>: Send + 'static {
     fn contains(&self, id: &str) -> bool;
     fn get(&self, id: &str) -> Option<&P>;
     fn get_mut(&mut self, id: &str) -> Option<&mut P>;
@@ -24,7 +24,7 @@ pub trait ReadPlayers<P: Player>: Send + 'static {
     fn iter(&self) -> Box<dyn Iterator<Item = &P> + '_>;
 }
 
-pub trait WritePlayers<P: Player>: Send + 'static {
+pub trait WritePlayerCollection<P: Player>: Send + 'static {
     fn add(&mut self, id: String, player: P) -> Option<P>;
     fn remove(&mut self, id: &str) -> Option<P>;
 }

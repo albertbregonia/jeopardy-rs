@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 
 use crate::game::jeopardy::board::Board;
@@ -37,5 +35,5 @@ pub enum PlayerCommandResponse {
     GetPoints(i32),
     GetWager(i32),
     GetFreeResponse(String),
-    GetScoreboard(BTreeMap<i32, String>),
+    GetScoreboard(Vec<(i32, String)>),
 }

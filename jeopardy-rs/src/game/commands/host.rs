@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use serde::{Deserialize, Serialize};
 
 /// Enum of commands the host or admin of the Jeopardy game can send.
@@ -47,5 +49,5 @@ pub enum HostCommandResponse {
     Success,
     GetAnswer(String),
     UpdatePoints(i32),
-    GetBuzzerQueue(Vec<String>),
+    GetBuzzerQueue(VecDeque<String>),
 }

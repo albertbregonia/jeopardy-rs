@@ -1,7 +1,7 @@
 use super::{Game, LobbyError, Responder};
 use crate::{
     lobby::Reply,
-    player::{ReadPlayers, WritePlayers},
+    player::{ReadPlayerCollection, WritePlayerCollection},
 };
 use tokio::{
     self,
@@ -205,7 +205,7 @@ pub mod lobby_test_constructs {
 
         fn handle_event(
             &mut self,
-            players: &mut dyn ReadPlayers<Self::Player>,
+            players: &mut dyn ReadPlayerCollection<Self::Player>,
             event: Self::Event,
         ) -> Self::EventResponse {
             match event {

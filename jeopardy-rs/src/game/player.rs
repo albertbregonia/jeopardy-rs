@@ -1,3 +1,5 @@
+use tokio::task::JoinHandle;
+
 use serde::Serialize;
 use stagecrew::player::Player;
 use thiserror::Error;
@@ -84,6 +86,20 @@ impl JeopardyPlayer {
             .send(event)
             .await
             .map_err(|_| JeopardyPlayerError::ConnectionLost)
+    }
+
+    /// primarily used to send in a sync context
+    pub fn send_background(
+        &self,
+        event: JeopardyPlayerEvent,
+    ) -> JoinHandle<Result<(), JeopardyPlayerError>> {
+        let sender = self.sender.clone();
+        tokio::spawn(async move {
+            sender
+                .send(event)
+                .await
+                .map_err(|_| JeopardyPlayerError::ConnectionLost)
+        })
     }
 }
 
@@ -188,6 +204,35 @@ mod player_tests {
 
         // WHEN
         let result = player.send(event).await;
+
+        // THEN
+        assert!(matches!(result, Err(JeopardyPlayerError::ConnectionLost)));
+    }
+
+    #[tokio::test]
+    async fn GIVEN_JeopardyPlayerEvent_WHEN_send_background_THEN_ok() {
+        // GIVEN
+        let (player, mut rx) = new_jeopardy_player();
+        let event = JeopardyPlayerEvent::PointsUpdate(player.points);
+
+        // WHEN
+        player.send_background(event).await.unwrap().unwrap();
+
+        // THEN
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            JeopardyPlayerEvent::PointsUpdate(points) if points == player.points,
+        ));
+    }
+
+    #[tokio::test]
+    async fn GIVEN_dropped_recv_WHEN_send_background_THEN_error() {
+        // GIVEN
+        let (player, _) = new_jeopardy_player();
+        let event = JeopardyPlayerEvent::PointsUpdate(player.points);
+
+        // WHEN
+        let result = player.send_background(event).await.unwrap();
 
         // THEN
         assert!(matches!(result, Err(JeopardyPlayerError::ConnectionLost)));

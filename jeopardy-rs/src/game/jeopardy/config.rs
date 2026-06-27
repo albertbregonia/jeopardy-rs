@@ -4,7 +4,7 @@ use crate::game::jeopardy::{
     JeopardyBoardError, board::Board, final_jeopardy::FinalJeopardy, non_empty_vec,
 };
 
-/// `JeopardyConfig` is the top level struct encapsulating
+/// `JeopardyConfig` is a high level struct encapsulating
 /// the entirety of the Jeopardy game configuration (board, final jeopardy, etc)
 /// not including state (points, daily doubles, etc.)
 /// The main purpose is to make this reusable across game lobby instances
