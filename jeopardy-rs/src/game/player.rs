@@ -81,6 +81,10 @@ impl JeopardyPlayer {
         Ok(())
     }
 
+    pub fn is_connected(&self) -> bool {
+        !self.sender.is_closed()
+    }
+
     pub async fn send(&mut self, event: JeopardyPlayerEvent) -> Result<(), JeopardyPlayerError> {
         self.sender
             .send(event)
@@ -236,5 +240,43 @@ mod player_tests {
 
         // THEN
         assert!(matches!(result, Err(JeopardyPlayerError::ConnectionLost)));
+    }
+
+    #[tokio::test]
+    async fn GIVEN_recv_WHEN_is_connected_THEN_ok() {
+        // GIVEN
+        let (player, _recv) = new_jeopardy_player();
+
+        // WHEN / THEN
+        assert!(player.is_connected());
+    }
+
+    #[tokio::test]
+    async fn GIVEN_dropped_recv_WHEN_is_connected_THEN_ok() {
+        // GIVEN
+        let (player, _) = new_jeopardy_player();
+
+        // WHEN / THEN
+        assert_eq!(false, player.is_connected());
+
+        // GIVEN
+        let (player, recv) = new_jeopardy_player();
+        // WHEN
+        drop(recv);
+
+        // THEN
+        assert_eq!(false, player.is_connected());
+    }
+
+    #[tokio::test]
+    async fn GIVEN_closed_recv_WHEN_is_connected_THEN_ok() {
+        // GIVEN
+        let (player, mut recv) = new_jeopardy_player();
+
+        // WHEN
+        recv.close();
+
+        // THEN
+        assert_eq!(false, player.is_connected());
     }
 }
