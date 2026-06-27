@@ -41,14 +41,13 @@ mod middleware_tests {
         // sample handler to ensure that our middleware has inserted the request id
         let test_handler = move |State(tx): State<Arc<mpsc::Sender<_>>>, req: Request<Body>| async move {
             let result = tokio::spawn(async move {
-                let request_id = req
-                    .extensions()
-                    .get::<Uuid>();
-                    assert!(matches!(
-                        request_id, // ensure the request extensions have a uuid / request id
-                        Some(Uuid{..})
-                    ));
-            }).await;
+                let request_id = req.extensions().get::<Uuid>();
+                assert!(matches!(
+                    request_id, // ensure the request extensions have a uuid / request id
+                    Some(Uuid { .. })
+                ));
+            })
+            .await;
             tx.send(result).await.unwrap();
         };
 
@@ -57,10 +56,10 @@ mod middleware_tests {
         // run oneshot web server
         tokio::spawn(
             Router::new()
-            .route("/", get(test_handler))
-            .layer(middleware::from_fn(request_id_middleware))
-            .with_state(Arc::new(tx))
-            .oneshot(request)
+                .route("/", get(test_handler))
+                .layer(middleware::from_fn(request_id_middleware))
+                .with_state(Arc::new(tx))
+                .oneshot(request),
         );
         // if the server panics, we panic too (test fails)
         // otherwise, test passes and we unwrap a unit
