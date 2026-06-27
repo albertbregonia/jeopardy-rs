@@ -11,7 +11,7 @@ use crate::game::{
     jeopardy::{
         board::Board, board_question::BoardQuestion, category::Category, config::JeopardyConfig,
     },
-    player::JeopardyPlayer,
+    player::{JeopardyPlayer, JeopardyPlayerEvent},
 };
 
 #[cfg(test)]
@@ -83,14 +83,14 @@ impl Jeopardy {
     fn add_player_to_buzzer_queue(
         &mut self,
         players: &dyn ReadPlayerCollection<JeopardyPlayer>,
-        id: String,
+        player_id: String,
     ) -> Result<(), JeopardyError> {
         if let JeopardyDisplayEvent::TextCard { .. } = self.display {
             // if there is no question shown, buzzing just no-ops
-            if !players.contains(&id) {
-                return Err(JeopardyError::PlayerForGivenIDNotFound(id));
+            if !players.contains(&player_id) {
+                return Err(JeopardyError::PlayerForGivenIDNotFound(player_id));
             }
-            self.buzzer_queue.push_back(id);
+            self.buzzer_queue.push_back(player_id);
         }
         Ok(())
     }
@@ -155,6 +155,34 @@ impl Jeopardy {
         Ok(question.underlying().answer().to_string())
     }
 
+    fn set_points_for_player(
+        players: &mut dyn ReadPlayerCollection<JeopardyPlayer>,
+        player_id: String,
+        points: i32,
+    ) -> Result<(), JeopardyError> {
+        let player = players
+            .get_mut(&player_id)
+            .ok_or(JeopardyError::PlayerForGivenIDNotFound(player_id))?;
+        player.points = points;
+        // notify the player that their points have changed
+        player.send_background(JeopardyPlayerEvent::PointsUpdate(player.points));
+        Ok(())
+    }
+
+    fn update_points_for_player(
+        players: &mut dyn ReadPlayerCollection<JeopardyPlayer>,
+        player_id: String,
+        delta: i32,
+    ) -> Result<i32, JeopardyError> {
+        let player = players
+            .get_mut(&player_id)
+            .ok_or(JeopardyError::PlayerForGivenIDNotFound(player_id))?;
+        player.points += delta;
+        // notify the player that their points have changed
+        player.send_background(JeopardyPlayerEvent::PointsUpdate(player.points));
+        Ok(player.points)
+    }
+
     /// From a `ReadPlayerCollection<..>`, aka a collection of `JeopardyPlayers`,
     /// creates a vec of tuples representing a player ID and their points (sorted descending).
     /// This relies on `sort_unstable_by` and therefore is `O(n * log(n))`.
@@ -204,7 +232,7 @@ mod jeopardy_handler_tests {
             Jeopardy, JeopardyError,
             commands::player::JeopardyDisplayEvent,
             jeopardy::{board::Board, config::JeopardyConfig, final_jeopardy::FinalJeopardy},
-            player::JeopardyPlayer,
+            player::{JeopardyPlayer, JeopardyPlayerEvent},
         },
         server::TestDefault,
     };
@@ -358,7 +386,7 @@ mod jeopardy_handler_tests {
         assert!(matches!(
             result,
             Err(JeopardyError::PlayerForGivenIDNotFound(id)) if id == invalid_id
-        ))
+        ));
     }
 
     #[test]
@@ -481,6 +509,121 @@ mod jeopardy_handler_tests {
         assert!(matches!(
             invalid_question_index_result,
             Err(JeopardyError::InvalidQuestionIndex(index)) if index == invalid_index
+        ));
+    }
+
+    // creates a new PlayerMap<JeopardyPlayer> with a single player
+    // given their ID and a `player_setup()` function to modify the player's state
+    // before adding them to the map.
+    // returns map and the mpsc::Receiver<_> handle that the player would receive events on
+    fn new_test_player_map_with_setup<F>(
+        player_id: String,
+        player_setup: F,
+    ) -> (
+        PlayerMap<JeopardyPlayer>,
+        mpsc::Receiver<JeopardyPlayerEvent>,
+    )
+    where
+        F: FnOnce(&mut JeopardyPlayer),
+    {
+        let mut players = PlayerMap::new();
+        let (tx, rx) = mpsc::channel(1);
+        let mut player = JeopardyPlayer::new(player_id.clone(), tx);
+        player_setup(&mut player);
+        players.add(player_id.clone(), player);
+        (players, rx)
+    }
+
+    #[tokio::test]
+    async fn GIVEN_points_WHEN_set_points_for_player_THEN_ok() {
+        // GIVEN
+        let player_id = "test".to_string();
+        let (mut players, mut rx) = new_test_player_map_with_setup(player_id.clone(), |player| {
+            player.points = 100; // should get overwritten
+        });
+
+        let expected_points = 10;
+
+        // WHEN
+        Jeopardy::set_points_for_player(&mut players, player_id.clone(), expected_points).unwrap();
+
+        // THEN
+        let player = players.get(&player_id).unwrap();
+        assert_eq!(expected_points, player.points);
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            JeopardyPlayerEvent::PointsUpdate(update) if update == expected_points
+        ));
+    }
+
+    #[test]
+    fn GIVEN_invalid_player_id_WHEN_set_points_for_player_THEN_error() {
+        // GIVEN
+        let expected_points = 100;
+        let player_id = "test".to_string();
+        let (mut players, _) = new_test_player_map_with_setup(player_id.clone(), |player| {
+            player.points = expected_points;
+        });
+
+        let invalid_id = "invalid".to_string(); // not in map
+        let points = 10; // dummy value
+
+        // WHEN
+        let result = Jeopardy::set_points_for_player(&mut players, invalid_id.clone(), points);
+
+        // THEN
+        let player = players.get(&player_id).unwrap();
+        assert_eq!(expected_points, player.points); // should not change
+        assert!(matches!(
+            result,
+            Err(JeopardyError::PlayerForGivenIDNotFound(id)) if id == invalid_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn GIVEN_delta_WHEN_update_points_for_player_THEN_ok() {
+        // GIVEN
+        let player_id = "test".to_string();
+        let init_points = 100;
+        let delta = -10;
+        let expected_points = init_points + delta;
+        let (mut players, mut rx) = new_test_player_map_with_setup(player_id.clone(), |player| {
+            player.points = init_points;
+        });
+
+        // WHEN
+        Jeopardy::update_points_for_player(&mut players, player_id.clone(), delta).unwrap();
+
+        // THEN
+        let player = players.get(&player_id).unwrap();
+        assert_eq!(expected_points, player.points);
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            JeopardyPlayerEvent::PointsUpdate(update) if update == expected_points
+        ));
+    }
+
+    #[test]
+    fn GIVEN_invalid_player_id_WHEN_update_points_for_player_THEN_error() {
+        // GIVEN
+        let player_id = "test".to_string();
+        let expected_points = 100;
+        let (mut players, _) = new_test_player_map_with_setup(player_id.clone(), |player| {
+            player.points = expected_points;
+        });
+
+        let invalid_id = "invalid".to_string(); // not in map
+        let delta = -10; // dummy value
+
+        // WHEN
+        let result = Jeopardy::update_points_for_player(&mut players, invalid_id.clone(), delta);
+
+        // THEN
+        let player = players.get(&player_id).unwrap();
+        assert_eq!(expected_points, player.points); // should not change
+        assert!(matches!(
+            result,
+            Err(JeopardyError::PlayerForGivenIDNotFound(id)) if id == invalid_id
         ));
     }
 }
