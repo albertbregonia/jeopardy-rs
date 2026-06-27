@@ -1,5 +1,5 @@
 # jeopardy-rs
-a simple, customizable, web-based implementation of the game ***Jeopardy*** written in rust
+an over-engineered, customizable, web-based implementation of the game ***Jeopardy*** written in rust
 
 # how to run
 

@@ -3,6 +3,8 @@ use thiserror::Error;
 mod handler;
 pub use handler::*;
 
+mod commands;
+
 pub mod jeopardy;
 mod player;
 
