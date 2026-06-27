@@ -7,7 +7,10 @@ use stagecrew::{
 
 use crate::game::{
     JeopardyCommand, JeopardyCommandResponse, JeopardyError,
-    commands::player::JeopardyDisplayEvent, jeopardy::config::JeopardyConfig,
+    commands::player::JeopardyDisplayEvent,
+    jeopardy::{
+        board::Board, board_question::BoardQuestion, category::Category, config::JeopardyConfig,
+    },
     player::JeopardyPlayer,
 };
 
@@ -96,6 +99,62 @@ impl Jeopardy {
         self.buzzer_queue.clear();
     }
 
+    fn get_question(
+        &self,
+        board_index: usize,
+        category_index: usize,
+        question_index: usize,
+    ) -> Result<(&Board, &Category, &BoardQuestion), JeopardyError> {
+        let board = self
+            .config
+            .boards()
+            .get(board_index)
+            .ok_or(JeopardyError::InvalidBoardIndex(board_index))?;
+        let category = board
+            .categories()
+            .get(category_index)
+            .ok_or(JeopardyError::InvalidCategoryIndex(category_index))?;
+        let question = category
+            .questions()
+            .get(question_index)
+            .ok_or(JeopardyError::InvalidQuestionIndex(question_index))?;
+        Ok((board, category, question))
+    }
+
+    fn get_mut_question(
+        &mut self,
+        board_index: usize,
+        category_index: usize,
+        question_index: usize,
+    ) -> Result<&mut BoardQuestion, JeopardyError> {
+        let board = self
+            .config
+            .boards_mut()
+            .get_mut(board_index)
+            .ok_or(JeopardyError::InvalidBoardIndex(board_index))?;
+        let category = board
+            .categories_mut()
+            .get_mut(category_index)
+            .ok_or(JeopardyError::InvalidCategoryIndex(category_index))?;
+        let question = category
+            .questions_mut()
+            .get_mut(question_index)
+            .ok_or(JeopardyError::InvalidQuestionIndex(question_index))?;
+        Ok(question)
+    }
+
+    // primary use case is for the host to see the answer
+    fn get_answer(
+        &self,
+        board_index: usize,
+        category_index: usize,
+        question_index: usize,
+    ) -> Result<String, JeopardyError> {
+        let (_board, _category, question) =
+            self.get_question(board_index, category_index, question_index)?;
+        Ok(question.underlying().answer().to_string())
+    }
+
     /// From a `ReadPlayerCollection<..>`, aka a collection of `JeopardyPlayers`,
     /// creates a vec of tuples representing a player ID and their points (sorted descending).
     /// This relies on `sort_unstable_by` and therefore is `O(n * log(n))`.
@@ -142,8 +201,10 @@ mod jeopardy_handler_tests {
 
     use crate::{
         game::{
-            Jeopardy, JeopardyError, commands::player::JeopardyDisplayEvent,
-            jeopardy::config::JeopardyConfig, player::JeopardyPlayer,
+            Jeopardy, JeopardyError,
+            commands::player::JeopardyDisplayEvent,
+            jeopardy::{board::Board, config::JeopardyConfig, final_jeopardy::FinalJeopardy},
+            player::JeopardyPlayer,
         },
         server::TestDefault,
     };
@@ -157,9 +218,10 @@ mod jeopardy_handler_tests {
     fn GIVEN_empty_jeopardy_handler_WHEN_new_THEN_ok() {
         // GIVEN
         let invalid_config = JeopardyConfig::invalid_default();
+        let host_password = ""; // no validation
 
         // WHEN
-        let result = Jeopardy::new("", invalid_config);
+        let result = Jeopardy::new(host_password, invalid_config);
 
         // THEN
         assert!(matches!(result, Err(JeopardyError::GameBoardsNotFound)));
@@ -206,7 +268,8 @@ mod jeopardy_handler_tests {
     fn GIVEN_player_id_WHEN_add_player_to_buzzer_queue_THEN_ok() {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
-        jeopardy.display = JeopardyDisplayEvent::TextCard { // ensure buzzing doesn't no-op
+        jeopardy.display = JeopardyDisplayEvent::TextCard {
+            // ensure buzzing doesn't no-op
             title: "".to_string(),
             content: "".to_string(),
         };
@@ -296,5 +359,128 @@ mod jeopardy_handler_tests {
             result,
             Err(JeopardyError::PlayerForGivenIDNotFound(id)) if id == invalid_id
         ))
+    }
+
+    #[test]
+    fn GIVEN_valid_indices_WHEN_get_question_and_answer_THEN_ok() {
+        // GIVEN
+        let boards = vec![
+            // create a jeopardy game with 2 boards and dims
+            Board::test_default_from_counts(1, 1),
+            Board::test_default_from_counts(10, 10),
+        ];
+        let config = JeopardyConfig::new(boards, FinalJeopardy::test_default()).unwrap();
+        let host_password = "";
+        let mut jeopardy = Jeopardy::new(host_password, config).unwrap();
+
+        // WHEN
+        for board_index in 0..jeopardy.config.boards().len() {
+            let category_len = jeopardy.config.boards()[board_index].categories().len();
+            for category_index in 0..category_len {
+                let question_len = jeopardy.config.boards()[board_index].categories()
+                    [category_index]
+                    .questions()
+                    .len();
+                for question_index in 0..question_len {
+                    // lookup question
+                    let (board, category, question) = jeopardy
+                        .get_question(board_index, category_index, question_index)
+                        .unwrap();
+
+                    // THEN
+                    let expected_board = &jeopardy.config.boards()[board_index];
+                    let expected_category = &expected_board.categories()[category_index];
+                    let expected_question = &expected_category.questions()[question_index];
+                    assert_eq!(board, expected_board); // assert manual lookup matches the function
+                    assert_eq!(category, expected_category);
+                    assert_eq!(question, expected_question);
+
+                    // ensure that the answer is the same
+                    // note: normally this should be a separate test but setup is tedious
+                    let answer = jeopardy
+                        .get_answer(board_index, category_index, question_index)
+                        .unwrap();
+                    assert_eq!(question.underlying().answer(), answer);
+
+                    // ensure that mut question returns the same
+                    let mut question = question.clone();
+                    let mut_question = jeopardy
+                        .get_mut_question(board_index, category_index, question_index)
+                        .unwrap();
+                    assert_eq!(&mut question, mut_question); // won't compile if not mut
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn GIVEN_invalid_indices_WHEN_get_question_THEN_error() {
+        // GIVEN
+        let jeopardy = Jeopardy::test_default(); // default 1 category, 1 question
+        let invalid_index = 10;
+        // WHEN
+        let invalid_board_index_result = jeopardy.get_question(invalid_index, 0, 0);
+        let invalid_category_index_result = jeopardy.get_question(0, invalid_index, 0);
+        let invalid_question_index_result = jeopardy.get_question(0, 0, invalid_index);
+
+        // THEN
+        assert!(matches!(
+            invalid_board_index_result,
+            Err(JeopardyError::InvalidBoardIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            invalid_category_index_result,
+            Err(JeopardyError::InvalidCategoryIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            invalid_question_index_result,
+            Err(JeopardyError::InvalidQuestionIndex(index)) if index == invalid_index
+        ));
+    }
+
+    #[test]
+    fn GIVEN_invalid_indices_WHEN_get_mut_question_THEN_error() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default(); // default 1 category, 1 question
+        let invalid_index = 10;
+
+        // WHEN / THEN
+        assert!(matches!(
+            jeopardy.get_mut_question(invalid_index, 0, 0),
+            Err(JeopardyError::InvalidBoardIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            jeopardy.get_mut_question(0, invalid_index, 0),
+            Err(JeopardyError::InvalidCategoryIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            jeopardy.get_mut_question(0, 0, invalid_index),
+            Err(JeopardyError::InvalidQuestionIndex(index)) if index == invalid_index
+        ));
+    }
+
+    #[test]
+    fn GIVEN_invalid_indices_WHEN_get_answer_THEN_error() {
+        // GIVEN
+        let jeopardy = Jeopardy::test_default(); // default 1 category, 1 question
+        let invalid_index = 10;
+        // WHEN
+        let invalid_board_index_result = jeopardy.get_answer(invalid_index, 0, 0);
+        let invalid_category_index_result = jeopardy.get_answer(0, invalid_index, 0);
+        let invalid_question_index_result = jeopardy.get_answer(0, 0, invalid_index);
+
+        // THEN
+        assert!(matches!(
+            invalid_board_index_result,
+            Err(JeopardyError::InvalidBoardIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            invalid_category_index_result,
+            Err(JeopardyError::InvalidCategoryIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            invalid_question_index_result,
+            Err(JeopardyError::InvalidQuestionIndex(index)) if index == invalid_index
+        ));
     }
 }

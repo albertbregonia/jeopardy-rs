@@ -105,13 +105,22 @@ impl Board {
                 .collect(),
         )
         .unwrap();
-        Self::new(
+        let mut board = Self::new(
             (0..category_count)
                 .into_iter()
                 .map(|_| test_category.clone())
                 .collect(),
         )
-        .unwrap()
+        .unwrap();
+
+        for c in board.categories() {
+            assert_eq!(&test_category, c);
+        }
+        for c in board.categories_mut() {
+            assert_eq!(&test_category, c);
+        }
+        board.categories_mut()[0].assign_points(); // won't compile if not mut
+        board
     }
 }
 
