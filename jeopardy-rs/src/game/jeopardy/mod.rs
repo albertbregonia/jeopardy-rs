@@ -31,10 +31,6 @@ pub enum JeopardyBoardError {
     EmptyQuestion,
     #[error("Requested daily double count is larger than the question count")]
     InvalidDailyDoubleCount,
-    #[error(
-        "Cannot randomly assign daily doubles with questions manually set as a daily double. Please ensure all are `false`"
-    )]
-    ManualDailyDoubleConflict,
 }
 
 /// deserialize helper to ensure we never get an empty string

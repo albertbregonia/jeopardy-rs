@@ -148,7 +148,7 @@ mod question_tests {
         let result = serde_json::from_value::<Question>(json);
 
         // THEN
-        assert!(matches!(result, Err(serde_json::Error { .. })))
+        assert!(matches!(result, Err(serde_json::Error { .. })));
     }
 
     #[test]
@@ -163,7 +163,7 @@ mod question_tests {
         let result = serde_json::from_value::<Question>(json);
 
         // THEN
-        assert!(matches!(result, Err(serde_json::Error { .. })))
+        assert!(matches!(result, Err(serde_json::Error { .. })));
     }
 
     #[test]

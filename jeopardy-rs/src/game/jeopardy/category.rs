@@ -66,6 +66,7 @@ impl TestDefault for Category {
         assert_eq!(category_name, category.name());
         assert_eq!(test_questions, category.questions());
         assert_eq!(test_questions, category.questions_mut());
+        category.assign_points(); // won't compile if not mut
 
         category
     }
@@ -102,6 +103,7 @@ mod category_tests {
         assert_eq!(test_category_name, category.name());
         assert_eq!(test_questions, category.questions());
         assert_eq!(test_questions, category.questions_mut());
+        category.assign_points(); // won't compile if not mut
     }
 
     #[test]
@@ -116,7 +118,7 @@ mod category_tests {
         assert!(matches!(
             category,
             Err(JeopardyBoardError::EmptyCategoryName)
-        ))
+        ));
     }
 
     #[test]
@@ -143,7 +145,7 @@ mod category_tests {
         let result = serde_json::from_value::<Category>(json);
 
         // THEN
-        assert!(matches!(result, Err(serde_json::Error { .. })))
+        assert!(matches!(result, Err(serde_json::Error { .. })));
     }
 
     #[test]
@@ -158,7 +160,7 @@ mod category_tests {
         assert!(matches!(
             category,
             Err(JeopardyBoardError::EmptyQuestionList)
-        ))
+        ));
     }
 
     #[test]
