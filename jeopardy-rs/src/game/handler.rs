@@ -11,6 +11,9 @@ use crate::game::{
     player::JeopardyPlayer,
 };
 
+#[cfg(test)]
+use crate::server::TestDefault;
+
 /// `Jeopardy` is the top level struct encapsulating the entire game for a `Lobby` (stagecrew).
 /// It contains the entire game state, the board configuration, final jeopardy, buzzer queue etc.
 /// Everything needed to manage an instance of the game of Jeopardy.
@@ -47,5 +50,60 @@ impl Game for Jeopardy {
             }
         };
         Ok(result)
+    }
+}
+
+impl Jeopardy {
+    pub fn new(host_password: &str, config: JeopardyConfig) -> Result<Self, JeopardyError> {
+        let display = config
+            .boards()
+            .get(0) // with the guarantees of `JeopardyConfig` this is rare
+            .ok_or(JeopardyError::GameBoardsNotFound)?
+            .redacted();
+        let game = Self {
+            host_password: host_password.to_string(),
+            display: JeopardyDisplayEvent::Board(display),
+            config,
+            current_question: (0, 0, 0),
+            buzzer_queue: VecDeque::new(),
+        };
+        Ok(game)
+    }
+
+    fn check_password(&self, host_password: &str) -> bool {
+        self.host_password == host_password
+    }
+}
+
+#[cfg(test)]
+impl TestDefault for Jeopardy {
+    fn test_default() -> Self {
+        // GIVEN
+        let host_password = "test_host_password";
+        let config = JeopardyConfig::test_default();
+
+        // WHEN
+        let jeopardy = Self::new(host_password, config.clone()).unwrap();
+
+        // THEN
+        assert!(jeopardy.check_password(host_password));
+        assert_eq!(jeopardy.config, config);
+        let JeopardyDisplayEvent::Board(ref board) = jeopardy.display else {
+            panic!("Default display event was not of variant JeopardyDisplayEvent::Board");
+        };
+        assert!(board.is_redacted());
+
+        jeopardy
+    }
+}
+
+#[cfg(test)]
+#[allow(non_snake_case)]
+mod jeopardy_handler_tests {
+    use crate::{game::Jeopardy, server::TestDefault};
+
+    #[test]
+    fn GIVEN_jeopardy_handler_WHEN_new_THEN_ok() {
+        Jeopardy::test_default();
     }
 }

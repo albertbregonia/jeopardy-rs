@@ -9,7 +9,7 @@ use crate::game::jeopardy::{
 /// not including state (points, daily doubles, etc.)
 /// The main purpose is to make this reusable across game lobby instances
 /// and allow for user-defined custom boards with custom questions, etc.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct JeopardyConfig {
     #[serde(deserialize_with = "non_empty_vec")]
     boards: Vec<Board>,

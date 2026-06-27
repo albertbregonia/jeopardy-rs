@@ -76,6 +76,15 @@ impl Board {
         redacted
     }
 
+    pub fn is_redacted(&self) -> bool {
+        let has_non_redacted = self.categories.iter().any(|c| {
+            c.questions()
+                .iter()
+                .any(|q| q.underlying().answer() != "" || q.is_daily_double())
+        });
+        !has_non_redacted
+    }
+
     /// helper function to create a n x m jeopardy board
     /// with dummy test values using the TestDefault::test_default() trait
     #[cfg(test)]
@@ -249,6 +258,34 @@ mod board_tests {
                 .all(|q| q.underlying().answer() == "" && !q.is_daily_double())
         });
         assert!(all_answers_redacted);
+    }
+
+    #[test]
+    fn GIVEN_redacted_board_WHEN_is_redacted_THEN_ok() {
+        // GIVEN
+        let category_count = 5;
+        let question_count_per_category = 5;
+        let board = Board::test_default_from_counts(category_count, question_count_per_category);
+
+        // WHEN
+        let redacted = board.redacted().is_redacted();
+
+        // THEN
+        assert!(redacted);
+    }
+
+    #[test]
+    fn GIVEN_nonredacted_board_WHEN_is_redacted_THEN_ok() {
+        // GIVEN
+        let category_count = 5;
+        let question_count_per_category = 5;
+        let board = Board::test_default_from_counts(category_count, question_count_per_category);
+
+        // WHEN
+        let redacted = board.is_redacted();
+
+        // THEN
+        assert_eq!(false, redacted);
     }
 
     #[test]
