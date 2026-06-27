@@ -41,6 +41,17 @@ impl JeopardyConfig {
     pub fn final_jeopardy(&self) -> &FinalJeopardy {
         &self.final_jeopardy
     }
+
+    /// `JeopardyConfig::new()` nor `serde::Deserialize()` can create this.
+    /// Therefore, in the rare case that SOMEHOW this happens,
+    /// we have a variant to test against
+    #[cfg(test)]
+    pub fn invalid_default() -> Self {
+        Self {
+            boards: vec![],
+            final_jeopardy: FinalJeopardy::test_default(),
+        }
+    }
 }
 
 #[cfg(test)]
