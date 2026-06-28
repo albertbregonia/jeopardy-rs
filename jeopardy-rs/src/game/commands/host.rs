@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
 
 /// Enum of commands the host or admin of the Jeopardy game can send.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub enum HostCommand {
     // may return JeopardyError - may be invalid board index
     ShowBoard {
@@ -44,7 +44,7 @@ pub enum HostCommand {
 /// Most of them will send `HostCommandResponse::Success` which is equivalently `Ok(())`.
 /// Otherwise, the variant mirrors the command:
 /// ie. `HostCommand::GetAnswer` maps to `HostCommandResponse::GetAnswer(String)`
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub enum HostCommandResponse {
     Success,
     GetAnswer(String),

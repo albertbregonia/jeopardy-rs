@@ -7,7 +7,10 @@ use stagecrew::{
 
 use crate::game::{
     JeopardyCommand, JeopardyCommandResponse, JeopardyError,
-    commands::player::JeopardyDisplayEvent,
+    commands::{
+        host::{HostCommand, HostCommandResponse},
+        player::{JeopardyDisplayEvent, PlayerCommand, PlayerCommandResponse},
+    },
     jeopardy::{
         board::Board, board_question::BoardQuestion, category::Category, config::JeopardyConfig,
     },
@@ -47,10 +50,14 @@ impl Game for Jeopardy {
             JeopardyCommand::Host {
                 host_password,
                 command,
-            } => JeopardyCommandResponse::Host(todo!()),
-            JeopardyCommand::Player { player_id, command } => {
-                JeopardyCommandResponse::Player(todo!())
-            }
+            } => JeopardyCommandResponse::Host(self.handle_host_command(
+                players,
+                host_password,
+                command,
+            )?),
+            JeopardyCommand::Player { player_id, command } => JeopardyCommandResponse::Player(
+                self.handle_player_command(players, player_id, command)?,
+            ),
         };
         Ok(result)
     }
@@ -74,6 +81,104 @@ impl Jeopardy {
             buzzer_queue: VecDeque::new(),
         };
         Ok(game)
+    }
+
+    fn handle_host_command(
+        &mut self,
+        players: &mut dyn ReadPlayerCollection<JeopardyPlayer>,
+        host_password: String,
+        command: HostCommand,
+    ) -> Result<HostCommandResponse, JeopardyError> {
+        if self.host_password != host_password {
+            return Err(JeopardyError::IncorrectHostPassword);
+        }
+        let result = match command {
+            HostCommand::ShowBoard { board_index } => {
+                self.show_board(players, board_index)?;
+                HostCommandResponse::Success
+            }
+            HostCommand::ShowQuestion {
+                board_index,
+                category_index,
+                question_index,
+            } => {
+                self.show_question(players, board_index, category_index, question_index)?;
+                HostCommandResponse::Success
+            }
+            HostCommand::ShowCurrentAnswer => {
+                self.show_current_answer(players)?;
+                HostCommandResponse::Success
+            }
+            HostCommand::SetPoints { player_id, points } => {
+                players.set_points_for_player(player_id, points)?;
+                HostCommandResponse::Success
+            }
+            HostCommand::UpdatePoints { player_id, delta } => {
+                let points = players.update_points_for_player(player_id, delta)?;
+                HostCommandResponse::UpdatePoints(points)
+            }
+            HostCommand::GetAnswer {
+                board_index,
+                category_index,
+                question_index,
+            } => HostCommandResponse::GetAnswer(self.get_answer(
+                board_index,
+                category_index,
+                question_index,
+            )?),
+            HostCommand::ShowFinalJeopardyQuestion => {
+                self.show_final_jeopardy_question(players);
+                HostCommandResponse::Success
+            }
+            HostCommand::ShowFinalJeopardyAnswer => {
+                self.show_final_jeopardy_answer(players);
+                HostCommandResponse::Success
+            }
+            HostCommand::ClearBuzzerQueue => {
+                self.clear_buzzer_queue();
+                HostCommandResponse::Success
+            }
+            HostCommand::GetBuzzerQueue => {
+                HostCommandResponse::GetBuzzerQueue(self.buzzer_queue.clone())
+            }
+        };
+        Ok(result)
+    }
+
+    fn handle_player_command(
+        &mut self,
+        players: &mut dyn ReadPlayerCollection<JeopardyPlayer>,
+        player_id: String,
+        command: PlayerCommand,
+    ) -> Result<PlayerCommandResponse, JeopardyError> {
+        let player = players
+            .get_mut(&player_id)
+            .ok_or(JeopardyError::PlayerForGivenIDNotFound(player_id.clone()))?;
+        let result = match command {
+            PlayerCommand::Buzz => {
+                self.add_player_to_buzzer_queue(players, player_id)?;
+                PlayerCommandResponse::Success
+            }
+            PlayerCommand::Refresh => PlayerCommandResponse::Refresh(self.display.clone()),
+            PlayerCommand::GetPoints => PlayerCommandResponse::GetPoints(player.points),
+            PlayerCommand::GetWager => PlayerCommandResponse::GetWager(player.wager()),
+            PlayerCommand::SetWager(wager) => {
+                player.set_wager(wager)?;
+                PlayerCommandResponse::Success
+            }
+            PlayerCommand::GetFreeResponse => {
+                PlayerCommandResponse::GetFreeResponse(player.free_response.clone())
+            }
+            PlayerCommand::SetFreeResponse(free_response) => {
+                // TODO: some sort of validation
+                player.free_response = free_response;
+                PlayerCommandResponse::Success
+            }
+            PlayerCommand::GetScoreboard => {
+                PlayerCommandResponse::GetScoreboard(players.scoreboard())
+            }
+        };
+        Ok(result)
     }
 
     fn check_password(&self, host_password: &str) -> bool {
@@ -357,19 +462,25 @@ impl TestDefault for Jeopardy {
 
 #[cfg(test)]
 #[allow(non_snake_case)]
-mod jeopardy_handler_tests {
-    use stagecrew::player::{
-        Player, ReadPlayerCollection, WritePlayerCollection, player_map::PlayerMap,
+mod handler_tests {
+    use stagecrew::{
+        lobby::Game,
+        player::{Player, ReadPlayerCollection, WritePlayerCollection, player_map::PlayerMap},
     };
     use tokio::sync::mpsc;
 
     use super::JeopardyPlayerCollectionOperation;
     use crate::{
         game::{
-            Jeopardy, JeopardyError,
-            commands::player::JeopardyDisplayEvent,
-            jeopardy::{board::Board, config::JeopardyConfig, final_jeopardy::FinalJeopardy, question},
-            player::{JeopardyPlayer, JeopardyPlayerEvent},
+            Jeopardy, JeopardyCommand, JeopardyCommandResponse, JeopardyError,
+            commands::{
+                host::{HostCommand, HostCommandResponse},
+                player::{JeopardyDisplayEvent, PlayerCommand, PlayerCommandResponse},
+            },
+            jeopardy::{
+                board::Board, config::JeopardyConfig, final_jeopardy::FinalJeopardy, question,
+            },
+            player::{JeopardyPlayer, JeopardyPlayerError, JeopardyPlayerEvent},
         },
         server::TestDefault,
     };
@@ -1143,7 +1254,7 @@ mod jeopardy_handler_tests {
                         .questions()[expected_question_index];
                     assert!(question.is_answered()); // set
                     assert!(jeopardy.buzzer_queue.is_empty()); // cleared
-                    
+
                     // ensure display cache is correct
                     let question = question.underlying();
                     assert!(matches!(
@@ -1262,5 +1373,348 @@ mod jeopardy_handler_tests {
                     if title == expected_title && content == expected_answer
             ))
         }
+    }
+
+    // this test only ensures that RequestA -> ResponseA
+    // the perspective here is ensuring that the caller receives a response we expect (as this is a near top level handler)
+    // not validating internal state exhaustively (other unit tests do that)
+    #[tokio::test] // needs tokio bc it calls `send_background()`
+    async fn GIVEN_host_command_WHEN_handle_host_command_THEN_ok() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let buzzer_queue = (0..10).into_iter().map(|i| i.to_string());
+        jeopardy.buzzer_queue.extend(buzzer_queue.clone());
+        let expected_buzzer_queue = buzzer_queue.collect::<Vec<_>>();
+        assert_eq!(false, jeopardy.buzzer_queue.is_empty()); // set the buzzer queue to dummy data
+
+        let (mut players, _) = new_test_jeopardy_player_map(10);
+        // programmatically get a random player to perform operations on
+        let player_id = players.iter().map(|p| p.id().to_string()).next().unwrap();
+        let player = players.get_mut(&player_id).unwrap();
+        let init_points = 100;
+        player.points = init_points;
+
+        let host_commands = vec![
+            // order matters here
+            HostCommand::GetBuzzerQueue,
+            HostCommand::ClearBuzzerQueue,
+            HostCommand::UpdatePoints {
+                player_id: player_id.clone(),
+                delta: -1,
+            },
+            HostCommand::SetPoints {
+                player_id: player_id.clone(),
+                points: 0,
+            },
+            HostCommand::ShowBoard { board_index: 0 },
+            HostCommand::ShowQuestion {
+                board_index: 0,
+                category_index: 0,
+                question_index: 0,
+            },
+            HostCommand::GetAnswer {
+                board_index: 0,
+                category_index: 0,
+                question_index: 0,
+            },
+            HostCommand::ShowCurrentAnswer,
+            HostCommand::ShowFinalJeopardyAnswer,
+            HostCommand::ShowFinalJeopardyQuestion,
+        ];
+        // WHEN
+        for command in host_commands {
+            let response = jeopardy
+                .handle_host_command(
+                    &mut players,
+                    jeopardy.host_password.clone(),
+                    command.clone(),
+                )
+                .unwrap();
+            // THEN - ensure responses are what we expect
+            let maps_correctly = match command {
+                HostCommand::GetBuzzerQueue => {
+                    matches!(
+                        response,
+                        HostCommandResponse::GetBuzzerQueue(queue)
+                            if queue == expected_buzzer_queue
+                    )
+                }
+                HostCommand::ClearBuzzerQueue => {
+                    matches!(response, HostCommandResponse::Success)
+                }
+                HostCommand::UpdatePoints { delta, .. } => {
+                    matches!(
+                        response,
+                        HostCommandResponse::UpdatePoints(points)
+                            if points == init_points + delta
+                    )
+                }
+                HostCommand::SetPoints { .. } => {
+                    matches!(response, HostCommandResponse::Success)
+                }
+                HostCommand::ShowBoard { .. } => {
+                    matches!(response, HostCommandResponse::Success)
+                }
+                HostCommand::ShowQuestion { .. } => {
+                    matches!(response, HostCommandResponse::Success)
+                }
+                HostCommand::ShowCurrentAnswer => {
+                    matches!(response, HostCommandResponse::Success)
+                }
+                HostCommand::GetAnswer {
+                    board_index,
+                    category_index,
+                    question_index,
+                } => {
+                    let expected_answer = jeopardy.config.boards()[board_index].categories()
+                        [category_index]
+                        .questions()[question_index]
+                        .underlying()
+                        .answer();
+                    matches!(
+                        response,
+                        HostCommandResponse::GetAnswer(answer)
+                            if answer == expected_answer
+                    )
+                }
+                HostCommand::ShowFinalJeopardyQuestion => {
+                    matches!(response, HostCommandResponse::Success)
+                }
+                HostCommand::ShowFinalJeopardyAnswer => {
+                    matches!(response, HostCommandResponse::Success)
+                }
+            };
+            assert!(maps_correctly)
+        }
+    }
+
+    // this test only ensures that RequestA -> ResponseA
+    // the perspective here is ensuring that the caller receives a response we expect (as this is a near top level handler)
+    // not validating internal state exhaustively (other unit tests do that)
+    #[test]
+    fn GIVEN_player_command_WHEN_handle_player_command_THEN_ok() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let (mut players, _) = new_test_jeopardy_player_map(10);
+        struct PlayerTestConfig {
+            points: i32,
+            wager: i32,
+            free_response: String,
+        }
+        // we need to do some setup so that scoreboard can actually sort by points
+        let test_configs = players
+            .iter()
+            .enumerate()
+            .map(|(index, p)| {
+                let expected = index as i32 + 1;
+                (
+                    p.id().to_string(),
+                    PlayerTestConfig {
+                        points: expected,
+                        wager: expected,
+                        free_response: index.to_string(),
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        test_configs.iter().for_each(|(id, config)| {
+            let p = players.get_mut(id).unwrap();
+
+            p.points = config.points;
+            p.free_response = config.free_response.clone();
+            p.set_wager(config.wager).unwrap();
+
+            assert_ne!("", p.free_response); // ensure not empty so we can empty it
+            assert_ne!(0, p.wager()); // ensure non-zero so we can set to 0
+        });
+
+        let player_commands = vec![
+            // order matters here
+            PlayerCommand::Buzz,
+            PlayerCommand::GetPoints,
+            PlayerCommand::GetScoreboard,
+            PlayerCommand::Refresh,
+            PlayerCommand::GetFreeResponse,
+            PlayerCommand::SetFreeResponse("".to_string()),
+            PlayerCommand::GetWager,
+            PlayerCommand::SetWager(0),
+        ];
+        // WHEN
+        for (player_id, config) in test_configs {
+            for command in player_commands.clone() {
+                let response = jeopardy
+                    .handle_player_command(&mut players, player_id.clone(), command.clone())
+                    .unwrap();
+                let player = players.get_mut(&player_id).unwrap();
+                // THEN - ensure responses are what we expect
+                let maps_correctly = match command {
+                    PlayerCommand::Buzz => {
+                        matches!(response, PlayerCommandResponse::Success)
+                    }
+                    PlayerCommand::GetPoints => {
+                        matches!(response, PlayerCommandResponse::GetPoints(points) if points == player.points)
+                    }
+                    PlayerCommand::GetScoreboard => matches!(
+                        response,
+                        PlayerCommandResponse::GetScoreboard(scoreboard)
+                            if scoreboard.is_sorted_by(|a, b| a >= b)
+                    ),
+                    PlayerCommand::Refresh => matches!(
+                        response,
+                        PlayerCommandResponse::Refresh(JeopardyDisplayEvent::Board(board))
+                            if board.is_redacted_version(&jeopardy.config.boards()[0])
+                    ),
+                    PlayerCommand::GetFreeResponse => matches!(
+                        response,
+                        PlayerCommandResponse::GetFreeResponse(free_resp)
+                            if free_resp == config.free_response
+                    ),
+                    PlayerCommand::SetFreeResponse(free_resp) => {
+                        // we test this here bc `handle_player_command()` set manually
+                        assert_eq!(free_resp, player.free_response);
+                        matches!(response, PlayerCommandResponse::Success)
+                    }
+                    PlayerCommand::GetWager => {
+                        matches!(response, PlayerCommandResponse::GetWager(wager) if wager == player.wager())
+                    }
+                    PlayerCommand::SetWager(wager) => {
+                        assert_eq!(wager, player.wager());
+                        matches!(response, PlayerCommandResponse::Success)
+                    }
+                };
+                assert!(maps_correctly)
+            }
+        }
+    }
+
+    #[test]
+    fn GIVEN_invalid_player_id_WHEN_handle_player_command_THEN_error() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let (mut players, _) = new_test_jeopardy_player_map(10);
+        let invalid_player_id = "invalid".to_string(); // not in players map
+        let command = PlayerCommand::GetPoints;
+
+        // WHEN
+        let handle_player_command_result = jeopardy.handle_player_command(
+            &mut players,
+            invalid_player_id.clone(),
+            command.clone(),
+        ); // ensure unified and specialized handler match
+        let handle_event_result = jeopardy.handle_event(
+            &mut players,
+            JeopardyCommand::Player {
+                player_id: invalid_player_id.clone(),
+                command,
+            },
+        );
+
+        // THEN
+        assert!(matches!(
+            handle_event_result,
+            Err(JeopardyError::PlayerForGivenIDNotFound(id))
+                if id == invalid_player_id
+        ));
+        assert!(matches!(
+            handle_player_command_result,
+            Err(JeopardyError::PlayerForGivenIDNotFound(id))
+                if id == invalid_player_id
+        ));
+    }
+
+    #[test]
+    fn GIVEN_incorrect_host_password_WHEN_handle_event_THEN_error() {
+        // GIVEN
+        let host_password = "test";
+        let mut jeopardy = Jeopardy::new(host_password, JeopardyConfig::test_default()).unwrap();
+        let (mut players, _) = new_test_jeopardy_player_map(10);
+        let command = HostCommand::GetBuzzerQueue;
+        let invalid_host_password = "invalid".to_string();
+
+        // WHEN
+        let handle_host_command_result = jeopardy.handle_host_command(
+            &mut players,
+            invalid_host_password.clone(),
+            command.clone(),
+        ); // ensure unified and specialized handler match
+        let handle_event_result = jeopardy.handle_event(
+            &mut players,
+            JeopardyCommand::Host {
+                host_password: invalid_host_password,
+                command,
+            },
+        );
+
+        // THEN
+        assert!(matches!(
+            handle_host_command_result,
+            Err(JeopardyError::IncorrectHostPassword)
+        ));
+        assert!(matches!(
+            handle_event_result,
+            Err(JeopardyError::IncorrectHostPassword)
+        ));
+    }
+
+    #[test]
+    fn GIVEN_player_error_WHEN_handle_event_THEN_error() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let (mut players, _) = new_test_jeopardy_player_map(10);
+        let player_id = players.iter().next().map(|p| p.id().to_string()).unwrap();
+        let invalid_wager = -1;
+        let command = PlayerCommand::SetWager(invalid_wager);
+
+        // WHEN
+        let result =
+            jeopardy.handle_event(&mut players, JeopardyCommand::Player { player_id, command });
+
+        // THEN
+        assert!(matches!(
+            result, // ensure that player errors are propagated
+            Err(JeopardyError::PlayerMisconfig(JeopardyPlayerError::InvalidWager { wager, .. }))
+                if wager == invalid_wager
+        ));
+    }
+
+    #[test]
+    fn GIVEN_command_WHEN_handle_event_THEN_ok() {
+        // GIVEN
+        let host_password = "host_password";
+        let mut jeopardy = Jeopardy::new(host_password, JeopardyConfig::test_default()).unwrap();
+        let (mut players, _) = new_test_jeopardy_player_map(10);
+        let player_id = players.iter().next().map(|p| p.id().to_string()).unwrap();
+
+        // WHEN
+        // ensure that player commands map to player responses
+        // and host commands map to host responses at the top level
+        let player_response = jeopardy
+            .handle_event(
+                &mut players,
+                JeopardyCommand::Player {
+                    player_id,
+                    command: PlayerCommand::GetPoints,
+                },
+            )
+            .unwrap();
+        let host_response = jeopardy
+            .handle_event(
+                &mut players,
+                JeopardyCommand::Host {
+                    host_password: host_password.to_string(),
+                    command: HostCommand::GetBuzzerQueue,
+                },
+            )
+            .unwrap();
+
+        // THEN
+        assert!(matches!(
+            player_response,
+            JeopardyCommandResponse::Player(PlayerCommandResponse::GetPoints(..))
+        ));
+        assert!(matches!(
+            host_response,
+            JeopardyCommandResponse::Host(HostCommandResponse::GetBuzzerQueue(..))
+        ));
     }
 }
