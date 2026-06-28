@@ -884,6 +884,11 @@ mod jeopardy_handler_tests {
             assert_eq!(0, current_category_index);
             assert_eq!(0, current_question_index);
 
+            assert!(matches!( // ensure internal cache is correct
+                &jeopardy.display,
+                JeopardyDisplayEvent::Board(board) if
+                    board.is_redacted_version(expected_board)
+            ));
             // ensure that players receive the event
             for rx in &mut receivers {
                 let JeopardyPlayerEvent::Display(JeopardyDisplayEvent::Board(board)) =
@@ -891,26 +896,7 @@ mod jeopardy_handler_tests {
                 else {
                     panic!("Player did not receive show_board() display event");
                 };
-                // this is long and complicated
-                // this is a manual `broadcasted_board == expected_board`
-                // but since received is always a redacted version we have to ignore that
-                let received_matches_expected_board = board
-                    .categories()
-                    .iter()
-                    .zip(expected_board.categories().iter())
-                    .all(|(c1, c2)| {
-                        c1.questions()
-                            .iter()
-                            .zip(c2.questions().iter())
-                            .all(|(q1, q2)| {
-                                // we can't use `PartialEq` here bc we have to ignore the redacted answers
-                                q1.underlying().content() == q2.underlying().content()
-                                    && q1.is_daily_double() == q2.is_daily_double()
-                                    && q1.is_answered() == q2.is_answered()
-                                    && q1.point_value() == q2.point_value()
-                            })
-                    });
-                assert!(board.is_redacted() && received_matches_expected_board);
+                assert!(board.is_redacted_version(expected_board));
             }
         }
     }

@@ -76,6 +76,7 @@ impl Board {
         redacted
     }
 
+    /// helper function to test if this instance of a Board is redacted
     pub fn is_redacted(&self) -> bool {
         let has_non_redacted = self.categories.iter().any(|c| {
             c.questions()
@@ -83,6 +84,29 @@ impl Board {
                 .any(|q| q.underlying().answer() != "" || q.is_daily_double())
         });
         !has_non_redacted
+    }
+
+    /// helper function to test if the current instance is the redacted version of a `Board`
+    pub fn is_redacted_version(&self, original: &Board) -> bool {
+        // this is long and complicated
+        // this is a manual `observed_board == original_board`
+        // but since received is always a redacted version we have to ignore that
+        self.is_redacted()
+            && self
+                .categories()
+                .iter()
+                .zip(original.categories().iter())
+                .all(|(c1, c2)| {
+                    c1.questions()
+                        .iter()
+                        .zip(c2.questions().iter())
+                        .all(|(q1, q2)| {
+                            // we can't use `PartialEq` here bc we have to ignore the redacted answers
+                            q1.underlying().content() == q2.underlying().content()
+                                && q1.is_answered() == q2.is_answered()
+                                && q1.point_value() == q2.point_value()
+                        })
+                })
     }
 
     /// helper function to create a n x m jeopardy board
@@ -295,6 +319,34 @@ mod board_tests {
 
         // THEN
         assert_eq!(false, redacted);
+    }
+
+    #[test]
+    fn GIVEN_redacted_WHEN_is_redacted_version_THEN_ok() {
+        // GIVEN
+        let category_count = 5;
+        let question_count_per_category = 5;
+        let board = Board::test_default_from_counts(category_count, question_count_per_category);
+
+        // WHEN
+        let is_redacted_version = board.redacted().is_redacted_version(&board);
+
+        // THEN
+        assert!(is_redacted_version);
+    }
+
+    #[test]
+    fn GIVEN_nonredacted_WHEN_is_redacted_version_THEN_ok() {
+        // GIVEN
+        let category_count = 5;
+        let question_count_per_category = 5;
+        let board = Board::test_default_from_counts(category_count, question_count_per_category);
+
+        // WHEN
+        let is_redacted_version = board.is_redacted_version(&board);
+
+        // THEN
+        assert_eq!(false, is_redacted_version);
     }
 
     #[test]
