@@ -182,6 +182,20 @@ impl Jeopardy {
             self.get_question(board_index, category_index, question_index)?;
         Ok(question.underlying().answer().to_string())
     }
+
+    // high level helper functions
+    // these abstractions represent actions to play the game of Jeopardy
+    // not just manage internal state
+
+    fn show_board(
+        &mut self,
+        players: &dyn ReadPlayerCollection<JeopardyPlayer>,
+        board_index: usize,
+    ) -> Result<(), JeopardyError> {
+        self.set_board(board_index)?;
+        players.broadcast(&self.display);
+        Ok(())
+    }
 }
 
 /// - internal trait just to make the code look more idiomatic
@@ -827,6 +841,82 @@ mod jeopardy_handler_tests {
 
     #[test]
     fn GIVEN_invalid_index_WHEN_set_board_THEN_error() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let invalid_board_index = 100;
+
+        // WHEN
+        let result = jeopardy.set_board(invalid_board_index);
+
+        // THEN
+        assert!(matches!(
+            result,
+            Err(JeopardyError::InvalidBoardIndex(index))
+                if index == invalid_board_index
+        ))
+    }
+
+    #[tokio::test]
+    async fn GIVEN_valid_indices_WHEN_show_board_THEN_ok() {
+        // GIVEN
+        let boards = vec![
+            // create a jeopardy game with 2 boards and dims
+            Board::test_default_from_counts(1, 1),
+            Board::test_default_from_counts(10, 10),
+        ];
+        let config = JeopardyConfig::new(boards, FinalJeopardy::test_default()).unwrap();
+        let host_password = "";
+        let mut jeopardy = Jeopardy::new(host_password, config).unwrap();
+        let (players, mut receivers) = new_test_jeopardy_player_map(10);
+
+        // WHEN
+        for board_index in 0..jeopardy.config.boards().len() {
+            jeopardy.show_board(&players, board_index).unwrap();
+            let expected_board = &jeopardy.config.boards()[board_index];
+
+            // THEN
+
+            // ensure internal state is correct
+            let (current_board_index, current_category_index, current_question_index) =
+                jeopardy.current_question;
+            // changing the board sets it to category 0 and question 0 (the types ensure non-empty)
+            assert_eq!(board_index, current_board_index);
+            assert_eq!(0, current_category_index);
+            assert_eq!(0, current_question_index);
+
+            // ensure that players receive the event
+            for rx in &mut receivers {
+                let JeopardyPlayerEvent::Display(JeopardyDisplayEvent::Board(board)) =
+                    rx.recv().await.unwrap()
+                else {
+                    panic!("Player did not receive show_board() display event");
+                };
+                // this is long and complicated
+                // this is a manual `broadcasted_board == expected_board`
+                // but since received is always a redacted version we have to ignore that
+                let received_matches_expected_board = board
+                    .categories()
+                    .iter()
+                    .zip(expected_board.categories().iter())
+                    .all(|(c1, c2)| {
+                        c1.questions()
+                            .iter()
+                            .zip(c2.questions().iter())
+                            .all(|(q1, q2)| {
+                                // we can't use `PartialEq` here bc we have to ignore the redacted answers
+                                q1.underlying().content() == q2.underlying().content()
+                                    && q1.is_daily_double() == q2.is_daily_double()
+                                    && q1.is_answered() == q2.is_answered()
+                                    && q1.point_value() == q2.point_value()
+                            })
+                    });
+                assert!(board.is_redacted() && received_matches_expected_board);
+            }
+        }
+    }
+
+    #[test]
+    fn GIVEN_invalid_index_WHEN_show_board_THEN_error() {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
         let invalid_board_index = 100;
