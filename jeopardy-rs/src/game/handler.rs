@@ -196,6 +196,64 @@ impl Jeopardy {
         players.broadcast(&self.display);
         Ok(())
     }
+
+    fn show_question(
+        &mut self,
+        players: &dyn ReadPlayerCollection<JeopardyPlayer>,
+        board_index: usize,
+        category_index: usize,
+        question_index: usize,
+    ) -> Result<(), JeopardyError> {
+        let (_, category, question) =
+            self.get_question(board_index, category_index, question_index)?;
+        // create text display from question
+        self.display = JeopardyDisplayEvent::TextCard {
+            title: category.name().to_string(),
+            content: question.underlying().content().to_string(),
+        };
+        self.set_question(board_index, category_index, question_index)?;
+
+        // clear buzzer before showing to ensure no pre-emptive buzz
+        self.clear_buzzer_queue();
+        players.broadcast(&self.display);
+        Ok(())
+    }
+
+    // technically infallible but the compiler cannot guarantee
+    fn show_current_answer(
+        &mut self,
+        players: &dyn ReadPlayerCollection<JeopardyPlayer>,
+    ) -> Result<(), JeopardyError> {
+        let (board_index, category_index, question_index) = self.current_question;
+        let question = self.get_mut_question(board_index, category_index, question_index)?;
+        question.set_answered(true);
+        let question = question.underlying();
+        self.display = JeopardyDisplayEvent::TextCard {
+            title: question.content().to_string(),
+            content: question.answer().to_string(),
+        };
+        self.clear_buzzer_queue();
+        players.broadcast(&self.display);
+        Ok(())
+    }
+
+    fn show_final_jeopardy_question(&mut self, players: &dyn ReadPlayerCollection<JeopardyPlayer>) {
+        let final_jeopardy = self.config.final_jeopardy();
+        self.display = JeopardyDisplayEvent::TextCard {
+            title: final_jeopardy.hint().to_string(),
+            content: final_jeopardy.question().content().to_string(),
+        };
+        players.broadcast(&self.display);
+    }
+
+    fn show_final_jeopardy_answer(&mut self, players: &dyn ReadPlayerCollection<JeopardyPlayer>) {
+        let final_jeopardy = self.config.final_jeopardy().question();
+        self.display = JeopardyDisplayEvent::TextCard {
+            title: final_jeopardy.content().to_string(),
+            content: final_jeopardy.answer().to_string(),
+        };
+        players.broadcast(&self.display);
+    }
 }
 
 /// - internal trait just to make the code look more idiomatic
@@ -310,7 +368,7 @@ mod jeopardy_handler_tests {
         game::{
             Jeopardy, JeopardyError,
             commands::player::JeopardyDisplayEvent,
-            jeopardy::{board::Board, config::JeopardyConfig, final_jeopardy::FinalJeopardy},
+            jeopardy::{board::Board, config::JeopardyConfig, final_jeopardy::FinalJeopardy, question},
             player::{JeopardyPlayer, JeopardyPlayerEvent},
         },
         server::TestDefault,
@@ -916,5 +974,293 @@ mod jeopardy_handler_tests {
             Err(JeopardyError::InvalidBoardIndex(index))
                 if index == invalid_board_index
         ))
+    }
+
+    #[tokio::test]
+    async fn GIVEN_valid_indices_WHEN_show_question_THEN_ok() {
+        let boards = vec![
+            // create a jeopardy game with 2 boards and dims
+            Board::test_default_from_counts(1, 1),
+            Board::test_default_from_counts(10, 10),
+        ];
+        let config = JeopardyConfig::new(boards, FinalJeopardy::test_default()).unwrap();
+        let host_password = "";
+        let mut jeopardy = Jeopardy::new(host_password, config).unwrap();
+        let (players, mut receivers) = new_test_jeopardy_player_map(10);
+
+        // goes through every question and "shows" the question
+        for expected_board_index in 0..jeopardy.config.boards().len() {
+            let category_len = jeopardy.config.boards()[expected_board_index]
+                .categories()
+                .len();
+            for expected_category_index in 0..category_len {
+                let question_len = jeopardy.config.boards()[expected_board_index].categories()
+                    [expected_category_index]
+                    .questions()
+                    .len();
+                for expected_question_index in 0..question_len {
+                    // GIVEN
+                    let question = &jeopardy.config.boards()[expected_board_index].categories()
+                        [expected_category_index]
+                        .questions()[expected_question_index];
+                    // set buzzer queue to some dummy data to ensure it gets cleared
+                    jeopardy.buzzer_queue = (0..10).into_iter().map(|i| i.to_string()).collect();
+                    assert_eq!(false, jeopardy.buzzer_queue.is_empty());
+                    assert_eq!(false, question.is_answered()); // default !answered
+
+                    // WHEN
+                    jeopardy
+                        .show_question(
+                            &players,
+                            expected_board_index,
+                            expected_category_index,
+                            expected_question_index,
+                        )
+                        .unwrap();
+
+                    // THEN
+
+                    // ensure internal state is correct
+                    let (current_board_index, current_category_index, current_question_index) =
+                        jeopardy.current_question;
+                    assert_eq!(expected_board_index, current_board_index); // assert current question matches expected
+                    assert_eq!(expected_category_index, current_category_index);
+                    assert_eq!(expected_question_index, current_question_index);
+                    let question = &jeopardy.config.boards()[expected_board_index].categories()
+                        [expected_category_index]
+                        .questions()[expected_question_index];
+                    assert_eq!(false, question.is_answered()); // untouched
+                    assert!(jeopardy.buzzer_queue.is_empty()); // cleared
+
+                    // ensure display cache is correct
+                    let category = &jeopardy.config.boards()[expected_board_index].categories()
+                        [expected_category_index];
+                    let expected_title = category.name();
+                    let expected_content = question.underlying().content();
+                    assert!(matches!(
+                        &jeopardy.display,
+                        JeopardyDisplayEvent::TextCard{title, content}
+                                if title == expected_title && content == expected_content
+                    ));
+
+                    // ensure that players receive the text card
+                    for rx in &mut receivers {
+                        assert!(matches!(
+                            rx.recv().await.unwrap(),
+                            JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard{title, content})
+                                if title == expected_title && content == expected_content
+                        ))
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn GIVEN_invalid_indices_WHEN_show_question_THEN_error() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default(); // default 1 category, 1 question
+        let (players, _) = new_test_jeopardy_player_map(10);
+        let invalid_index = 10;
+
+        // WHEN
+        let invalid_board_index_result = jeopardy.show_question(&players, invalid_index, 0, 0);
+        let invalid_category_index_result = jeopardy.show_question(&players, 0, invalid_index, 0);
+        let invalid_question_index_result = jeopardy.show_question(&players, 0, 0, invalid_index);
+
+        // THEN
+        assert!(matches!( // ensure unchanged
+            &jeopardy.display,
+            JeopardyDisplayEvent::Board(board) if
+                board.is_redacted_version(&jeopardy.config.boards()[0])
+        ));
+        assert!(matches!(
+            invalid_board_index_result,
+            Err(JeopardyError::InvalidBoardIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            invalid_category_index_result,
+            Err(JeopardyError::InvalidCategoryIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            invalid_question_index_result,
+            Err(JeopardyError::InvalidQuestionIndex(index)) if index == invalid_index
+        ));
+    }
+
+    #[tokio::test]
+    async fn GIVEN_valid_indices_WHEN_show_current_answer_THEN_ok() {
+        let boards = vec![
+            // create a jeopardy game with 2 boards and dims
+            Board::test_default_from_counts(1, 1),
+            Board::test_default_from_counts(10, 10),
+        ];
+        let config = JeopardyConfig::new(boards, FinalJeopardy::test_default()).unwrap();
+        let host_password = "";
+        let mut jeopardy = Jeopardy::new(host_password, config).unwrap();
+        let (players, mut receivers) = new_test_jeopardy_player_map(10);
+
+        // goes through every question and "shows" the question
+        for expected_board_index in 0..jeopardy.config.boards().len() {
+            let category_len = jeopardy.config.boards()[expected_board_index]
+                .categories()
+                .len();
+            for expected_category_index in 0..category_len {
+                let question_len = jeopardy.config.boards()[expected_board_index].categories()
+                    [expected_category_index]
+                    .questions()
+                    .len();
+                for expected_question_index in 0..question_len {
+                    // GIVEN
+                    let question = &jeopardy.config.boards()[expected_board_index].categories()
+                        [expected_category_index]
+                        .questions()[expected_question_index];
+                    // set buzzer queue to some dummy data to ensure it gets cleared
+                    jeopardy.buzzer_queue = (0..10).into_iter().map(|i| i.to_string()).collect();
+                    assert_eq!(false, jeopardy.buzzer_queue.is_empty());
+                    assert_eq!(false, question.is_answered()); // default !answered
+                    jeopardy
+                        .set_question(
+                            expected_board_index,
+                            expected_category_index,
+                            expected_question_index,
+                        )
+                        .unwrap();
+
+                    // WHEN
+                    jeopardy.show_current_answer(&players).unwrap();
+
+                    // THEN
+
+                    // ensure internal state is correct
+                    let (current_board_index, current_category_index, current_question_index) =
+                        jeopardy.current_question;
+                    assert_eq!(expected_board_index, current_board_index); // assert current question matches expected
+                    assert_eq!(expected_category_index, current_category_index);
+                    assert_eq!(expected_question_index, current_question_index);
+                    let question = &jeopardy.config.boards()[expected_board_index].categories()
+                        [expected_category_index]
+                        .questions()[expected_question_index];
+                    assert!(question.is_answered()); // set
+                    assert!(jeopardy.buzzer_queue.is_empty()); // cleared
+                    
+                    // ensure display cache is correct
+                    let question = question.underlying();
+                    assert!(matches!(
+                        &jeopardy.display,
+                        JeopardyDisplayEvent::TextCard{title, content}
+                            if title == question.content() && content == question.answer()
+                    ));
+
+                    // ensure that players receive the text card
+                    for rx in &mut receivers {
+                        assert!(matches!(
+                            rx.recv().await.unwrap(),
+                            JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard{title, content})
+                                if title == question.content() && content == question.answer()
+                        ))
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn GIVEN_invalid_indices_WHEN_show_current_answer_THEN_error() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default(); // default 1 category, 1 question
+        let (players, _) = new_test_jeopardy_player_map(10);
+        let invalid_index = 10;
+
+        // WHEN
+        // with the current implementation, this is impossible
+        // however, we still test in case future changes break it
+        jeopardy.current_question = (invalid_index, 0, 0);
+        let invalid_board_index_result = jeopardy.show_current_answer(&players);
+        jeopardy.current_question = (0, invalid_index, 0);
+        let invalid_category_index_result = jeopardy.show_current_answer(&players);
+        jeopardy.current_question = (0, 0, invalid_index);
+        let invalid_question_index_result = jeopardy.show_current_answer(&players);
+
+        // THEN
+        assert!(matches!( // ensure unchanged
+            &jeopardy.display,
+            JeopardyDisplayEvent::Board(board) if
+                board.is_redacted_version(&jeopardy.config.boards()[0])
+        ));
+        assert!(matches!(
+            invalid_board_index_result,
+            Err(JeopardyError::InvalidBoardIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            invalid_category_index_result,
+            Err(JeopardyError::InvalidCategoryIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            invalid_question_index_result,
+            Err(JeopardyError::InvalidQuestionIndex(index)) if index == invalid_index
+        ));
+    }
+
+    #[tokio::test]
+    async fn GIVEN_jeopardy_WHEN_show_final_jeopardy_question_THEN_ok() {
+        // infallible - so no negative test
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let (players, receivers) = new_test_jeopardy_player_map(10);
+
+        // WHEN
+        jeopardy.show_final_jeopardy_question(&players);
+
+        // THEN
+        let fin_jeopardy = jeopardy.config.final_jeopardy();
+        let expected_title = fin_jeopardy.hint();
+        let expected_content = fin_jeopardy.question().content();
+        // ensure text card was created properly
+        assert!(matches!(
+            jeopardy.display,
+            JeopardyDisplayEvent::TextCard { title, content }
+                if title == expected_title && content == expected_content
+        ));
+
+        // ensure players receive the same event
+        for mut rx in receivers {
+            assert!(matches!(
+                rx.recv().await.unwrap(),
+                JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard { title, content })
+                    if title == expected_title && content == expected_content
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn GIVEN_jeopardy_WHEN_show_final_jeopardy_answer_THEN_ok() {
+        // infallible - so no negative test
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let (players, receivers) = new_test_jeopardy_player_map(10);
+
+        // WHEN
+        jeopardy.show_final_jeopardy_answer(&players);
+
+        // THEN
+        let fin_jeopardy = jeopardy.config.final_jeopardy().question();
+        let expected_title = fin_jeopardy.content();
+        let expected_answer = fin_jeopardy.answer();
+        // ensure text card was created properly
+        assert!(matches!(
+            jeopardy.display,
+            JeopardyDisplayEvent::TextCard { title, content }
+                if title == expected_title && content == expected_answer
+        ));
+
+        // ensure players receive the same event
+        for mut rx in receivers {
+            assert!(matches!(
+                rx.recv().await.unwrap(),
+                JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard { title, content })
+                    if title == expected_title && content == expected_answer
+            ))
+        }
     }
 }
