@@ -80,6 +80,8 @@ impl Jeopardy {
         self.host_password == host_password
     }
 
+    // small helper functions to manage the internal state
+
     fn add_player_to_buzzer_queue(
         &mut self,
         players: &dyn ReadPlayerCollection<JeopardyPlayer>,
@@ -98,6 +100,32 @@ impl Jeopardy {
     fn clear_buzzer_queue(&mut self) {
         self.buzzer_queue.clear();
     }
+
+    fn set_board(&mut self, board_index: usize) -> Result<(), JeopardyError> {
+        self.set_question(board_index, 0, 0)?;
+        Ok(())
+    }
+
+    fn set_question(
+        &mut self,
+        board_index: usize,
+        category_index: usize,
+        question_index: usize,
+    ) -> Result<(), JeopardyError> {
+        self.get_question(
+            board_index, // validate only, we don't need the response
+            category_index,
+            question_index,
+        )?;
+        self.current_question = (
+            board_index, // set the current question indices
+            category_index,
+            question_index,
+        );
+        Ok(())
+    }
+
+    // helper functions to interface with the game boards
 
     fn get_question(
         &self,
@@ -154,13 +182,62 @@ impl Jeopardy {
             self.get_question(board_index, category_index, question_index)?;
         Ok(question.underlying().answer().to_string())
     }
+}
+
+/// - internal trait just to make the code look more idiomatic
+///   instead of having to pass &mut dyn ReadPlayersCollection<_> everywhere
+///
+/// these are Jeopardy operations that do not update state
+/// and just interface with the player collection
+trait JeopardyPlayerCollectionOperation {
+    fn scoreboard(&self) -> Vec<(i32, String)>;
+    fn broadcast(&self, event: &JeopardyDisplayEvent);
+    fn set_points_for_player(
+        &mut self,
+        player_id: String,
+        points: i32,
+    ) -> Result<(), JeopardyError>;
+    fn update_points_for_player(
+        &mut self,
+        player_id: String,
+        delta: i32,
+    ) -> Result<i32, JeopardyError>;
+}
+
+impl<T: ReadPlayerCollection<JeopardyPlayer> + ?Sized> JeopardyPlayerCollectionOperation for T {
+    /// From a `ReadPlayerCollection<..>`, aka a collection of `JeopardyPlayers`,
+    /// creates a vec of tuples representing a player ID and their points (sorted descending).
+    /// This relies on `sort_unstable_by` and therefore is `O(n * log(n))`.
+    /// Using this is fine because `n` players is always going to be small (`n < 10`) for a lobby instance.
+    fn scoreboard(&self) -> Vec<(i32, String)> {
+        let mut scoreboard = self
+            .iter()
+            .map(|p| (p.points, p.id().to_string()))
+            .collect::<Vec<_>>();
+        scoreboard.sort_unstable_by(|(a_points, _), (b_points, _)| b_points.cmp(a_points));
+        scoreboard
+    }
+
+    fn broadcast(&self, event: &JeopardyDisplayEvent) {
+        // here, we don't care about if the broadcast fails.
+        // the actor lobby at the higher level will handle
+        // if the player's disconnects or the recv handle is dropped
+
+        // therefore, we can use a bunch of short lived tokio tasks
+        // to broadcast the display event to everyone
+        for p in self.iter() {
+            p.send_background(JeopardyPlayerEvent::Display(event.clone()));
+        }
+    }
+
+    // helepr functions to update player state
 
     fn set_points_for_player(
-        players: &mut dyn ReadPlayerCollection<JeopardyPlayer>,
+        &mut self,
         player_id: String,
         points: i32,
     ) -> Result<(), JeopardyError> {
-        let player = players
+        let player = self
             .get_mut(&player_id)
             .ok_or(JeopardyError::PlayerForGivenIDNotFound(player_id))?;
         player.points = points;
@@ -170,30 +247,17 @@ impl Jeopardy {
     }
 
     fn update_points_for_player(
-        players: &mut dyn ReadPlayerCollection<JeopardyPlayer>,
+        &mut self,
         player_id: String,
         delta: i32,
     ) -> Result<i32, JeopardyError> {
-        let player = players
+        let player = self
             .get_mut(&player_id)
             .ok_or(JeopardyError::PlayerForGivenIDNotFound(player_id))?;
         player.points += delta;
         // notify the player that their points have changed
         player.send_background(JeopardyPlayerEvent::PointsUpdate(player.points));
         Ok(player.points)
-    }
-
-    /// From a `ReadPlayerCollection<..>`, aka a collection of `JeopardyPlayers`,
-    /// creates a vec of tuples representing a player ID and their points (sorted descending).
-    /// This relies on `sort_unstable_by` and therefore is `O(n * log(n))`.
-    /// Using this is fine because `n` players is always going to be small (`n < 10`) for a lobby instance.
-    fn scoreboard(players: &dyn ReadPlayerCollection<JeopardyPlayer>) -> Vec<(i32, String)> {
-        let mut scoreboard = players
-            .iter()
-            .map(|p| (p.points, p.id().to_string()))
-            .collect::<Vec<_>>();
-        scoreboard.sort_unstable_by(|(a_points, _), (b_points, _)| b_points.cmp(a_points));
-        scoreboard
     }
 }
 
@@ -227,6 +291,7 @@ mod jeopardy_handler_tests {
     };
     use tokio::sync::mpsc;
 
+    use super::JeopardyPlayerCollectionOperation;
     use crate::{
         game::{
             Jeopardy, JeopardyError,
@@ -269,7 +334,7 @@ mod jeopardy_handler_tests {
         }
 
         // WHEN
-        let scoreboard = Jeopardy::scoreboard(&mut players);
+        let scoreboard = players.scoreboard();
 
         // THEN
         assert_eq!(scoreboard.len(), n); // ensure same size
@@ -281,15 +346,23 @@ mod jeopardy_handler_tests {
     }
 
     /// given a count `n`, creates adds players to a player map with an id from 1-10 (inclusive)
-    fn new_test_jeopardy_player_map(n: usize) -> PlayerMap<JeopardyPlayer> {
+    /// returns that map with all mpsc::Receiver<_> handlers
+    fn new_test_jeopardy_player_map(
+        n: usize,
+    ) -> (
+        PlayerMap<JeopardyPlayer>,
+        Vec<mpsc::Receiver<JeopardyPlayerEvent>>,
+    ) {
         let mut players = PlayerMap::new();
+        let mut receivers = vec![];
         for i in 1..=n {
-            let (tx, _) = mpsc::channel(1);
+            let (tx, rx) = mpsc::channel(1);
             let id = i.to_string();
             let player = JeopardyPlayer::new(id.clone(), tx);
             players.add(id, player);
+            receivers.push(rx);
         }
-        players
+        (players, receivers)
     }
 
     #[test]
@@ -302,7 +375,7 @@ mod jeopardy_handler_tests {
             content: "".to_string(),
         };
         let n = 10;
-        let players = new_test_jeopardy_player_map(n);
+        let (players, _) = new_test_jeopardy_player_map(n);
         assert!(jeopardy.buzzer_queue.is_empty()); // ensure empty
         let id_order = players.iter().map(|p| p.id()).collect::<Vec<_>>();
 
@@ -326,7 +399,7 @@ mod jeopardy_handler_tests {
     fn GIVEN_non_text_display_WHEN_add_player_to_buzzer_queue_THEN_ok() {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default(); // no text display, default JeopardyDisplayEvent::Board
-        let players = new_test_jeopardy_player_map(10);
+        let (players, _) = new_test_jeopardy_player_map(10);
         assert!(jeopardy.buzzer_queue.is_empty());
 
         // WHEN
@@ -350,7 +423,7 @@ mod jeopardy_handler_tests {
             content: "".to_string(),
         };
         let n = 10;
-        let players = new_test_jeopardy_player_map(n);
+        let (players, _) = new_test_jeopardy_player_map(n);
         for player in players.iter() {
             jeopardy
                 .add_player_to_buzzer_queue(&players, player.id().to_string())
@@ -374,7 +447,7 @@ mod jeopardy_handler_tests {
             content: "".to_string(),
         };
         let n = 10;
-        let players = new_test_jeopardy_player_map(n);
+        let (players, _) = new_test_jeopardy_player_map(n);
         assert!(jeopardy.buzzer_queue.is_empty()); // ensure empty
         let invalid_id = "11".to_string();
 
@@ -446,6 +519,7 @@ mod jeopardy_handler_tests {
         // GIVEN
         let jeopardy = Jeopardy::test_default(); // default 1 category, 1 question
         let invalid_index = 10;
+
         // WHEN
         let invalid_board_index_result = jeopardy.get_question(invalid_index, 0, 0);
         let invalid_category_index_result = jeopardy.get_question(0, invalid_index, 0);
@@ -492,6 +566,7 @@ mod jeopardy_handler_tests {
         // GIVEN
         let jeopardy = Jeopardy::test_default(); // default 1 category, 1 question
         let invalid_index = 10;
+
         // WHEN
         let invalid_board_index_result = jeopardy.get_answer(invalid_index, 0, 0);
         let invalid_category_index_result = jeopardy.get_answer(0, invalid_index, 0);
@@ -545,7 +620,9 @@ mod jeopardy_handler_tests {
         let expected_points = 10;
 
         // WHEN
-        Jeopardy::set_points_for_player(&mut players, player_id.clone(), expected_points).unwrap();
+        players
+            .set_points_for_player(player_id.clone(), expected_points)
+            .unwrap();
 
         // THEN
         let player = players.get(&player_id).unwrap();
@@ -569,7 +646,7 @@ mod jeopardy_handler_tests {
         let points = 10; // dummy value
 
         // WHEN
-        let result = Jeopardy::set_points_for_player(&mut players, invalid_id.clone(), points);
+        let result = players.set_points_for_player(invalid_id.clone(), points);
 
         // THEN
         let player = players.get(&player_id).unwrap();
@@ -592,7 +669,9 @@ mod jeopardy_handler_tests {
         });
 
         // WHEN
-        Jeopardy::update_points_for_player(&mut players, player_id.clone(), delta).unwrap();
+        players
+            .update_points_for_player(player_id.clone(), delta)
+            .unwrap();
 
         // THEN
         let player = players.get(&player_id).unwrap();
@@ -616,7 +695,7 @@ mod jeopardy_handler_tests {
         let delta = -10; // dummy value
 
         // WHEN
-        let result = Jeopardy::update_points_for_player(&mut players, invalid_id.clone(), delta);
+        let result = players.update_points_for_player(invalid_id.clone(), delta);
 
         // THEN
         let player = players.get(&player_id).unwrap();
@@ -625,5 +704,141 @@ mod jeopardy_handler_tests {
             result,
             Err(JeopardyError::PlayerForGivenIDNotFound(id)) if id == invalid_id
         ));
+    }
+
+    #[tokio::test] // there is no negative test for this bc `broadcast()` is fire and forget
+    async fn GIVEN_display_event_WHEN_broadcast_THEN_ok() {
+        // GIVEN
+        let (players, receivers) = new_test_jeopardy_player_map(10);
+        let expected_title = "title".to_string();
+        let expected_content = "content".to_string();
+        let event = JeopardyDisplayEvent::TextCard {
+            title: expected_title.clone(),
+            content: expected_content.clone(),
+        };
+
+        // WHEN
+        players.broadcast(&event); // this operation is infallible, fire and forget
+
+        // THEN
+        for mut rx in receivers {
+            assert!(matches!(
+                rx.recv().await.unwrap(), // ensure we receive the broadcast
+                JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard { title, content })
+                    if title == expected_title && content == expected_content
+            ));
+        }
+    }
+
+    #[test]
+    fn GIVEN_valid_indices_WHEN_set_question_THEN_ok() {
+        // GIVEN
+        let boards = vec![
+            // create a jeopardy game with 2 boards and dims
+            Board::test_default_from_counts(1, 1),
+            Board::test_default_from_counts(10, 10),
+        ];
+        let config = JeopardyConfig::new(boards, FinalJeopardy::test_default()).unwrap();
+        let host_password = "";
+        let mut jeopardy = Jeopardy::new(host_password, config).unwrap();
+
+        // WHEN
+        // goes through every question and set it as the current question
+        for expected_board_index in 0..jeopardy.config.boards().len() {
+            let category_len = jeopardy.config.boards()[expected_board_index]
+                .categories()
+                .len();
+            for expected_category_index in 0..category_len {
+                let question_len = jeopardy.config.boards()[expected_board_index].categories()
+                    [expected_category_index]
+                    .questions()
+                    .len();
+                for expected_question_index in 0..question_len {
+                    jeopardy
+                        .set_question(
+                            expected_board_index,
+                            expected_category_index,
+                            expected_question_index,
+                        )
+                        .unwrap();
+
+                    // THEN
+                    let (current_board_index, current_category_index, current_question_index) =
+                        jeopardy.current_question;
+                    assert_eq!(expected_board_index, current_board_index); // assert current question matches expected
+                    assert_eq!(expected_category_index, current_category_index);
+                    assert_eq!(expected_question_index, current_question_index);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn GIVEN_invalid_indices_WHEN_set_question_THEN_error() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default(); // default 1 category, 1 question
+        let invalid_index = 10;
+
+        // WHEN
+        let invalid_board_index_result = jeopardy.set_question(invalid_index, 0, 0);
+        let invalid_category_index_result = jeopardy.set_question(0, invalid_index, 0);
+        let invalid_question_index_result = jeopardy.set_question(0, 0, invalid_index);
+
+        // THEN
+        assert!(matches!(
+            invalid_board_index_result,
+            Err(JeopardyError::InvalidBoardIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            invalid_category_index_result,
+            Err(JeopardyError::InvalidCategoryIndex(index)) if index == invalid_index
+        ));
+        assert!(matches!(
+            invalid_question_index_result,
+            Err(JeopardyError::InvalidQuestionIndex(index)) if index == invalid_index
+        ));
+    }
+
+    #[test]
+    fn GIVEN_valid_indices_WHEN_set_board_THEN_ok() {
+        // GIVEN
+        let boards = vec![
+            // create a jeopardy game with 2 boards and dims
+            Board::test_default_from_counts(1, 1),
+            Board::test_default_from_counts(10, 10),
+        ];
+        let config = JeopardyConfig::new(boards, FinalJeopardy::test_default()).unwrap();
+        let host_password = "";
+        let mut jeopardy = Jeopardy::new(host_password, config).unwrap();
+
+        // WHEN
+        for board_index in 0..jeopardy.config.boards().len() {
+            jeopardy.set_board(board_index).unwrap();
+
+            // THEN
+            let (current_board_index, current_category_index, current_question_index) =
+                jeopardy.current_question;
+            // changing the board sets it to category 0 and question 0 (the types ensure non-empty)
+            assert_eq!(board_index, current_board_index);
+            assert_eq!(0, current_category_index);
+            assert_eq!(0, current_question_index);
+        }
+    }
+
+    #[test]
+    fn GIVEN_invalid_index_WHEN_set_board_THEN_error() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let invalid_board_index = 100;
+
+        // WHEN
+        let result = jeopardy.set_board(invalid_board_index);
+
+        // THEN
+        assert!(matches!(
+            result,
+            Err(JeopardyError::InvalidBoardIndex(index))
+                if index == invalid_board_index
+        ))
     }
 }

@@ -60,8 +60,8 @@ impl Board {
             let lookup = &mut self.categories_mut()[category_index].questions_mut()[question_index];
             // if the position is not a manually set daily double and it wasn't set by the algo
             if !lookup.is_daily_double() && !set_coordinates.contains(&coordinates) {
-                lookup.set_daily_double(true);
                 set_coordinates.insert(coordinates);
+                lookup.set_daily_double(true);
             }
         }
         Ok(())
