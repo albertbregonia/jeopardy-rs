@@ -1,4 +1,6 @@
 use super::ManagerEntry;
+#[cfg(test)]
+use crate::lobby::lobby_test_constructs::TestGame;
 use crate::lobby::{Game, Lobby};
 
 pub struct PasswordProtectedLobby<G: Game> {
@@ -22,6 +24,16 @@ impl<G: Game> PasswordProtectedLobby<G> {
     }
 }
 
+#[cfg(test)]
+impl PasswordProtectedLobby<TestGame> {
+    pub fn with_test_game(id: String, password: String) -> Self {
+        use crate::player::player_map::PlayerMap;
+
+        let lobby = Lobby::new(TestGame::default(), PlayerMap::new(), 1);
+        Self::new(id.clone(), password, lobby)
+    }
+}
+
 impl<G: Game> ManagerEntry for PasswordProtectedLobby<G> {
     type Game = G;
     fn lobby(&self) -> &Lobby<G> {
@@ -34,39 +46,20 @@ impl<G: Game> ManagerEntry for PasswordProtectedLobby<G> {
 }
 
 #[cfg(test)]
-pub mod password_protected_lobby_test_constructs {
-    use crate::{
-        lobby::{Lobby, lobby_test_constructs::TestGame},
-        manager::PasswordProtectedLobby,
-        player::player_map::PlayerMap,
-    };
-
-    pub fn new_test_password_protected_lobby(
-        id: String,
-        password: String,
-    ) -> PasswordProtectedLobby<TestGame> {
-        let lobby = Lobby::new(TestGame::default(), PlayerMap::new(), 1);
-        PasswordProtectedLobby::new(id.clone(), password, lobby)
-    }
-}
-
-#[cfg(test)]
 #[allow(non_snake_case)]
 mod password_lobby_tests {
-    use crate::manager::{
-        ManagerEntry, password_protected_lobby_test_constructs::new_test_password_protected_lobby,
-    };
+    use crate::manager::{ManagerEntry, PasswordProtectedLobby};
 
     #[tokio::test]
     async fn GIVEN_pw_lobby_WHEN_check_password_THEN_ok() {
         let password = "12345".to_string(); // very secure, NSA core
-        let lobby = new_test_password_protected_lobby("1".to_string(), password.clone());
+        let lobby = PasswordProtectedLobby::with_test_game("1".to_string(), password.clone());
         assert!(lobby.is_correct_password(&password));
     }
 
     #[tokio::test]
     async fn GIVEN_incorrect_pw_for_pw_lobby_WHEN_check_password_THEN_ok() {
-        let lobby = new_test_password_protected_lobby("1".to_string(), "12345".to_string());
+        let lobby = PasswordProtectedLobby::with_test_game("1".to_string(), "12345".to_string());
         assert_eq!(lobby.is_correct_password("please"), false);
     }
 
@@ -76,7 +69,7 @@ mod password_lobby_tests {
         // ensure we can get access to the underlying lobby
         // lowk a "test for testing"
         // but we're testing the concrete type matches the trait expectation
-        let lobby = new_test_password_protected_lobby("1".to_string(), "".to_string());
+        let lobby = PasswordProtectedLobby::with_test_game("1".to_string(), "".to_string());
         assert_eq!(lobby.lobby().is_shutdown(), false);
     }
 }

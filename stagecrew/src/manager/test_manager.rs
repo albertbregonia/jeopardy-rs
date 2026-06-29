@@ -115,7 +115,6 @@ pub mod test_manager_constructs {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod test_manager_tests {
-    use crate::manager::password_protected_lobby_test_constructs::new_test_password_protected_lobby;
     use crate::manager::{ManagerEntry, ManagerError};
     use crate::{
         lobby::lobby_test_constructs::TestGame,
@@ -134,7 +133,7 @@ mod test_manager_tests {
         assert!(matches!(
             manager.add(
                 "",
-                new_test_password_protected_lobby("".to_string(), "".to_string())
+                PasswordProtectedLobby::with_test_game("".to_string(), "".to_string())
             ),
             Err(ManagerError::Dependency(..))
         ));
@@ -157,7 +156,7 @@ mod test_manager_tests {
             assert!(matches!(
                 manager.add(
                     "",
-                    new_test_password_protected_lobby("".to_string(), "".to_string())
+                    PasswordProtectedLobby::with_test_game("".to_string(), "".to_string())
                 ),
                 Ok(())
             ));
@@ -176,7 +175,7 @@ mod test_manager_tests {
     async fn GIVEN_n_operations_WHEN_reset_THEN_ok() {
         // GIVEN
         let mut manager = TestManager::<PasswordProtectedLobby<TestGame>>::default();
-        let entry = new_test_password_protected_lobby("".to_string(), "".to_string());
+        let entry = PasswordProtectedLobby::with_test_game("".to_string(), "".to_string());
         manager.set_fail_after_n(1); // dummy value so we can add
         manager.add("", entry).unwrap(); // add dummy lobby for get(..) to run against 
         manager.reset();

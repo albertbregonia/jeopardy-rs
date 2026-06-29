@@ -111,7 +111,7 @@ pub type JeopardyServerState =
     Arc<JeopardyServer<MapManager<PasswordProtectedLobby<Jeopardy>>, NonZeroAsciiValidator>>;
 
 impl JeopardyServer<MapManager<PasswordProtectedLobby<Jeopardy>>, NonZeroAsciiValidator> {
-    fn from_config(config: ServerConfig) -> Self {
+    pub fn from_config(config: ServerConfig) -> Self {
         JeopardyServer::new(
             MapManager::new(),
             NonZeroAsciiValidator::new(config.max_username_length),

@@ -52,10 +52,7 @@ impl<E: ManagerEntry> Manager for MapManager<E> {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod map_manager_tests {
-    use crate::manager::{
-        Manager, ManagerEntry, ManagerError, MapManager,
-        password_protected_lobby_test_constructs::new_test_password_protected_lobby,
-    };
+    use crate::manager::{Manager, ManagerEntry, ManagerError, MapManager, PasswordProtectedLobby};
 
     // although we don't use await anywhere,
     // the underlying lobby needs a tokio runtime therefore: tokio::test
@@ -65,7 +62,7 @@ mod map_manager_tests {
         // GIVEN
         let mut manager = MapManager::new();
         let id = "1".to_string();
-        let entry = new_test_password_protected_lobby(id.clone(), "".to_string());
+        let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
 
         // WHEN
         manager.add(&id, entry).unwrap();
@@ -83,12 +80,12 @@ mod map_manager_tests {
         // GIVEN
         let mut manager = MapManager::default();
         let id = "1".to_string();
-        let entry = new_test_password_protected_lobby(id.clone(), "".to_string());
+        let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
         manager.add(&id, entry).unwrap();
         assert!(manager.has(&id).unwrap());
 
         // WHEN
-        let duplicate = new_test_password_protected_lobby(id.clone(), "".to_string());
+        let duplicate = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
         let result = manager.add(&id, duplicate);
 
         // THEN
@@ -103,7 +100,7 @@ mod map_manager_tests {
         // GIVEN
         let mut manager = MapManager::default();
         let id = "1".to_string();
-        let entry = new_test_password_protected_lobby(id.clone(), "".to_string());
+        let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
         manager.add(&id, entry).unwrap();
         assert!(manager.has(&id).unwrap());
 
@@ -122,7 +119,7 @@ mod map_manager_tests {
         // GIVEN
         let mut manager = MapManager::default();
         let id = "1".to_string();
-        let entry = new_test_password_protected_lobby(id.clone(), "".to_string());
+        let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
         manager.add(&id, entry).unwrap();
         assert!(manager.has(&id).unwrap());
 
@@ -143,7 +140,7 @@ mod map_manager_tests {
         // GIVEN
         let mut manager = MapManager::default();
         let id = "1".to_string();
-        let entry = new_test_password_protected_lobby(id.clone(), "".to_string());
+        let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
         manager.add(&id, entry).unwrap();
         assert!(manager.has(&id).unwrap());
 
@@ -162,7 +159,7 @@ mod map_manager_tests {
         // GIVEN
         let mut manager = MapManager::default();
         let id = "1".to_string();
-        let entry = new_test_password_protected_lobby(id.clone(), "".to_string());
+        let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
         manager.add(&id, entry).unwrap();
         assert!(manager.has(&id).unwrap());
 

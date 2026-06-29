@@ -12,7 +12,7 @@ mod handler;
 pub use handler::*;
 pub mod commands;
 pub mod jeopardy;
-mod player;
+pub mod player;
 
 /// A unified type to combine requests when interfacing with a Game trait
 #[derive(Debug, Deserialize)]

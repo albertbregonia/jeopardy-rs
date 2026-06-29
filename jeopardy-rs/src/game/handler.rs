@@ -70,7 +70,7 @@ impl Jeopardy {
     pub fn new(host_password: &str, config: JeopardyConfig) -> Result<Self, JeopardyError> {
         let display = config
             .boards()
-            .get(0) // with the guarantees of `JeopardyConfig` this is rare
+            .first() // with the guarantees of `JeopardyConfig` this is rare
             .ok_or(JeopardyError::GameBoardsNotFound)?
             .redacted();
         let game = Self {
