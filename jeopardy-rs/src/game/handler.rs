@@ -477,9 +477,7 @@ mod handler_tests {
                 host::{HostCommand, HostCommandResponse},
                 player::{JeopardyDisplayEvent, PlayerCommand, PlayerCommandResponse},
             },
-            jeopardy::{
-                board::Board, config::JeopardyConfig, final_jeopardy::FinalJeopardy, question,
-            },
+            jeopardy::{board::Board, config::JeopardyConfig, final_jeopardy::FinalJeopardy},
             player::{JeopardyPlayer, JeopardyPlayerError, JeopardyPlayerEvent},
         },
         server::TestDefault,
