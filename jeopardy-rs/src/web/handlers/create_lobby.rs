@@ -1,14 +1,18 @@
 use axum::Extension;
+use axum::extract::Path;
 use axum::{Json, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use stagecrew::lobby::Lobby;
 use stagecrew::manager::PasswordProtectedLobby;
 use stagecrew::player::player_map::PlayerMap;
+use tokio::time::sleep;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::game::Jeopardy;
 use crate::game::jeopardy::config::JeopardyConfig;
 use crate::server::{CredsValidatorGeneric, GenericJeopardyServerState, ManagerGeneric};
+use crate::web::handlers::delete_lobby::DeleteLobbyRequest;
 use crate::web::handlers::validators::CredsValidator;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -61,6 +65,7 @@ pub async fn create_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
             }),
         );
     }
+    tracing::info!("Valid request format");
 
     // check conflict
     let CreateLobbyRequest {
@@ -99,7 +104,6 @@ pub async fn create_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
     }
 
     // create lobby based on input
-    // TODO: add request fields for assign daily double, assign points, etc.
     let new_game = match Jeopardy::new(&host_password, config) {
         Ok(game) => game,
         Err(e) => {
@@ -133,6 +137,27 @@ pub async fn create_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
         );
     }
     tracing::info!("Lobby successfully created");
+    tokio::spawn(
+        async move {
+            // in case a user creates a lobby but logs off,
+            // spawn a task to delete the lobby if it is empty after the grace period
+            // if the lobby gets manually deleted, it will just no-op
+            sleep(state.config().lobby_cleanup_grace_period).await;
+            let cleanup_request = DeleteLobbyRequest {
+                force: false, // do not delete if there are players
+                lobby_password,
+                host_password,
+            };
+            super::delete_lobby(
+                State(state),
+                Path(lobby_name),
+                Extension(request_id_uuid), // technically unused
+                Json(cleanup_request),
+            )
+            .await
+        } // inherit the span to differentiate between other delete calls
+        .instrument(create_lobby_span.clone()),
+    );
     (
         StatusCode::CREATED,
         Json(CreateLobbyResponse {
@@ -249,11 +274,13 @@ pub mod create_lobby_test_util {
 #[allow(non_snake_case)]
 mod create_lobby_tests {
 
+    use std::time::Duration;
+
     use super::*;
     use crate::{
         server::TestDefault,
         web::handlers::create_lobby::create_lobby_test_util::{
-            new_test_server, new_test_server_with_test_manager,
+            new_test_server, new_test_server_with_player, new_test_server_with_test_manager,
         },
     };
     use stagecrew::manager::Manager;
@@ -462,5 +489,52 @@ mod create_lobby_tests {
         state.manager().write().await.set_never_fail();
         let lobby_exists = state.manager().read().await.has(&lobby_name).unwrap();
         assert_eq!(false, lobby_exists); // was not created
+    }
+
+    // grace period cleanup tests
+
+    #[tokio::test]
+    async fn GIVEN_empty_lobby_WHEN_grace_period_cleanup_THEN_ok() {
+        // GIVEN
+        let lobby_name = "test".to_string();
+        let state = new_test_server(Some(CreateLobbyRequest {
+            lobby_name: lobby_name.clone(),
+            lobby_password: "test".to_string(),
+            host_password: "test".to_string(),
+            config: JeopardyConfig::test_default(),
+        }))
+        .await;
+
+        // WHEN
+        // wait for lobby to be deleted
+        let grace_period = state.config().lobby_cleanup_grace_period + Duration::from_secs(1);
+        sleep(grace_period).await;
+
+        // THEN
+        let lobby_exists = state.manager().read().await.has(&lobby_name).unwrap();
+        assert_eq!(false, lobby_exists); // gone bc it was empty
+    }
+
+    #[tokio::test]
+    async fn GIVEN_nonempty_lobby_WHEN_grace_period_cleanup_THEN_ok() {
+        // GIVEN
+        let lobby_name = "test".to_string();
+        let request = CreateLobbyRequest {
+            lobby_name: lobby_name.clone(),
+            lobby_password: "test".to_string(),
+            host_password: "test".to_string(),
+            config: JeopardyConfig::test_default(),
+        };
+        let player_id = "test_player".to_string();
+        let (state, _) = new_test_server_with_player(request, player_id.clone()).await;
+
+        // WHEN
+        // wait for lobby cleanup task to wake up and no-op
+        let after_grace_period = state.config().lobby_cleanup_grace_period + Duration::from_secs(1);
+        sleep(after_grace_period).await;
+
+        // THEN
+        let lobby_exists = state.manager().read().await.has(&lobby_name).unwrap();
+        assert!(lobby_exists);
     }
 }
