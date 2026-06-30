@@ -51,19 +51,20 @@ fn is_valid_host_request(
 ) -> bool {
     let lobby_id_ok = validator.is_valid_lobby_id(lobby_id);
     let lobby_pw_ok = validator.is_valid_lobby_password(&request.lobby_password);
-    let host_pw_ok = if let JeopardyCommand::Host {
-        ref host_password, ..
-    } = request.command
-    {
-        validator.is_valid_host_password(host_password)
-    } else {
-        tracing::info!("Request is not a host command. Host password validation skipped");
-        true
+    let special = match &request.command {
+        JeopardyCommand::Host { host_password, .. } => {
+            let host_pw_ok = validator.is_valid_host_password(host_password);
+            tracing::info!("Valid host password?: {host_pw_ok}");
+            host_pw_ok
+        }
+        JeopardyCommand::Player { player_id, .. } => {
+            let username_ok = validator.is_valid_username(player_id);
+            tracing::info!("Valid target player ID?: {username_ok}");
+            username_ok
+        }
     };
-    tracing::info!(
-        "Valid lobby ID?: {lobby_id_ok} | lobby password?: {lobby_pw_ok} | host password?: {host_pw_ok}"
-    );
-    lobby_id_ok && lobby_pw_ok && host_pw_ok
+    tracing::info!("Valid lobby ID?: {lobby_id_ok} | lobby password?: {lobby_pw_ok}");
+    lobby_id_ok && lobby_pw_ok && special
 }
 
 /// Top level handler for host commands to control the Jeopardy game.
@@ -507,30 +508,65 @@ mod host_command_tests {
             // repeat the test with a player command instead of a host command
             // bc the host can induce a command for a player as well as their host commands
             // ensure that errors out the same way
-            if lobby_name == "" || lobby_password == "" {
-                let (status_code, response) = super::handle_host_command(
-                    State(state.clone()),
-                    Path(lobby_name.clone()),
-                    Extension(Uuid::new_v4()),
-                    Json(HostRequest {
-                        lobby_password: lobby_password.clone(),
-                        command: JeopardyCommand::Player {
-                            player_id: player_id.clone(),
-                            command: PlayerCommand::Buzz,
-                        },
-                    }),
-                )
-                .await;
-                // THEN
-                assert_eq!(status_code, StatusCode::BAD_REQUEST);
-                assert!(matches!(
-                    response,
-                    Json(HostResponse {
-                        result: Err(..),
-                        ..
-                    })
-                ));
-            }
+            if lobby_name == "" || lobby_password == "" {}
+        }
+    }
+
+    #[tokio::test]
+    async fn GIVEN_invalid_format_player_command_WHEN_handle_host_command_THEN_error() {
+        // GIVEN
+        let create_lobby_request = CreateLobbyRequest {
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
+            config: JeopardyConfig::test_default(),
+        };
+        let player_id = "test_player".to_string(); // we need a player to run PlayerCommand against
+        let (state, _) =
+            new_test_server_with_player(create_lobby_request.clone(), player_id.clone()).await;
+
+        for i in 0..3 {
+            // switch which field has the invalid format
+            let lobby_name = if i == 0 {
+                "".to_string()
+            } else {
+                create_lobby_request.lobby_name.clone()
+            };
+            let lobby_password = if i == 1 {
+                "".to_string()
+            } else {
+                create_lobby_request.lobby_password.clone()
+            };
+            let player_id = if i == 2 {
+                "".to_string()
+            } else {
+                player_id.clone()
+            };
+
+            // WHEN
+            let (status_code, response) = super::handle_host_command(
+                State(state.clone()),
+                Path(lobby_name.clone()),
+                Extension(Uuid::new_v4()),
+                Json(HostRequest {
+                    lobby_password: lobby_password.clone(),
+                    command: JeopardyCommand::Player {
+                        player_id: player_id.clone(),
+                        command: PlayerCommand::Buzz,
+                    },
+                }),
+            )
+            .await;
+
+            // THEN
+            assert_eq!(status_code, StatusCode::BAD_REQUEST);
+            assert!(matches!(
+                response,
+                Json(HostResponse {
+                    result: Err(..),
+                    ..
+                })
+            ));
         }
     }
 

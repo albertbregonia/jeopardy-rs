@@ -159,7 +159,10 @@ mod test_manager_tests {
         assert!(matches!(manager.has(""), Err(ManagerError::Dependency(..))));
         assert!(matches!(manager.get(""), Err(ManagerError::Dependency(..))));
         assert!(matches!(manager.len(), Err(ManagerError::Dependency(..))));
-        assert!(matches!(manager.is_empty(), Err(ManagerError::Dependency(..))));
+        assert!(matches!(
+            manager.is_empty(),
+            Err(ManagerError::Dependency(..))
+        ));
         assert!(matches!(
             manager.add(
                 "",
@@ -180,7 +183,8 @@ mod test_manager_tests {
         manager.set_never_fail();
 
         // WHEN
-        for _ in 0..u16::MAX { // i can't do usize::MAX bc it would take too long
+        for _ in 0..u16::MAX {
+            // i can't do usize::MAX bc it would take too long
             // these should all pass normally
             assert!(matches!(manager.is_empty(), Ok(true)));
             assert!(matches!(

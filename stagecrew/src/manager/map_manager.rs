@@ -200,14 +200,16 @@ mod map_manager_tests {
     async fn GIVEN_entry_WHEN_is_empty_THEN_ok() {
         // GIVEN
         let mut manager = MapManager::default();
-        
+
         // WHEN / THEN
         assert!(manager.is_empty().unwrap()); // is_empty is infallible for MapManager so no negative tests
 
+        // WHEN
         let id = "1".to_string();
         let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
         manager.add(&id, entry).unwrap();
-        
+
+        // THEN
         assert_eq!(false, manager.is_empty().unwrap());
     }
 }
