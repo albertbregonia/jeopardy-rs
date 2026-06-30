@@ -47,6 +47,11 @@ impl<E: ManagerEntry> Manager for MapManager<E> {
             .remove(id)
             .ok_or_else(|| ManagerError::EntryNotFound(id.to_string()))
     }
+
+    /// infallible, however the signature cannot guarantee
+    fn len(&self) -> Result<usize, ManagerError> {
+        Ok(self.lobbies.len())
+    }
 }
 
 #[cfg(test)]
@@ -63,6 +68,7 @@ mod map_manager_tests {
         let mut manager = MapManager::new();
         let id = "1".to_string();
         let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
+        let len_before = manager.len().unwrap();
 
         // WHEN
         manager.add(&id, entry).unwrap();
@@ -73,6 +79,8 @@ mod map_manager_tests {
             result,
             Ok(exists) if exists
         ));
+        let len_after = manager.len().unwrap();
+        assert_eq!(len_before + 1, len_after); // added
     }
 
     #[tokio::test]
@@ -83,6 +91,7 @@ mod map_manager_tests {
         let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
         manager.add(&id, entry).unwrap();
         assert!(manager.has(&id).unwrap());
+        let len_before = manager.len().unwrap();
 
         // WHEN
         let duplicate = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
@@ -93,6 +102,8 @@ mod map_manager_tests {
             result,
             Err(ManagerError::EntryIDConflict(id)) if id == id
         ));
+        let len_after = manager.len().unwrap();
+        assert_eq!(len_before, len_after); // unchanged
     }
 
     #[tokio::test]
@@ -103,6 +114,7 @@ mod map_manager_tests {
         let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
         manager.add(&id, entry).unwrap();
         assert!(manager.has(&id).unwrap());
+        let len_before = manager.len().unwrap();
 
         // WHEN
         let result = manager.remove(&id);
@@ -111,7 +123,9 @@ mod map_manager_tests {
         assert!(matches!(
             result,
             Ok(entry) if entry.id() == id
-        ))
+        ));
+        let len_after = manager.len().unwrap();
+        assert_eq!(len_before - 1, len_after); // removed
     }
 
     #[tokio::test]
@@ -122,6 +136,7 @@ mod map_manager_tests {
         let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
         manager.add(&id, entry).unwrap();
         assert!(manager.has(&id).unwrap());
+        let len_before = manager.len().unwrap();
 
         // WHEN
         let invalid_id = "2";
@@ -132,7 +147,9 @@ mod map_manager_tests {
         assert!(matches!(
             result,
             Err(ManagerError::EntryNotFound(id)) if id == invalid_id
-        ))
+        ));
+        let len_after = manager.len().unwrap();
+        assert_eq!(len_before, len_after); // unchanged
     }
 
     #[tokio::test]

@@ -106,7 +106,7 @@ impl<M: Manager, C: CredsValidator> JeopardyServer<M, C> {
     }
 }
 
-/// top level alias for our chosen implementation of `JeopardyServer`
+/// Top level alias for our chosen implementation of `JeopardyServer`
 pub type JeopardyServerState =
     Arc<JeopardyServer<MapManager<PasswordProtectedLobby<Jeopardy>>, NonZeroAsciiValidator>>;
 
@@ -121,6 +121,10 @@ impl JeopardyServer<MapManager<PasswordProtectedLobby<Jeopardy>>, NonZeroAsciiVa
 }
 
 // generic aliases - really terrible but is the only way i don't have to write this everywhere
+
+/// Generic type alias for a `Manager<PasswordProtectedLobby<Jeopardy>>` of any kind.
+/// Used in conjuncture with `GenericJeopardyServerState`. Many of the web server handlers
+/// are written to expect a `PasswordProtectedLobby<Jeopardy>` and therefore, cannot be fully generic.
 pub trait ManagerGeneric:
     Manager<Entry = PasswordProtectedLobby<Jeopardy>> + Send + Sync + 'static
 {
@@ -130,7 +134,12 @@ impl<T> ManagerGeneric for T where
 {
 }
 
+/// Generic type alias for a `CredsValidator` of any kind.
+/// Used in conjuncture with `GenericJeopardyServerState`
 pub trait CredsValidatorGeneric: CredsValidator + Send + Sync + 'static {}
 impl<T> CredsValidatorGeneric for T where T: CredsValidator + Send + Sync + 'static {}
+/// Generic type alias for an `Arc<JeopardyServer<_>>` of any kind.
+/// Using this is important so that handlers are testable with a `TestManager`
+/// that can be configured to error out when we expect.
 pub type GenericJeopardyServerState<ManagerGeneric, CredsValidatorGeneric> =
     Arc<JeopardyServer<ManagerGeneric, CredsValidatorGeneric>>;

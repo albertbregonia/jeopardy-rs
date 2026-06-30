@@ -89,7 +89,7 @@ impl Jeopardy {
         host_password: String,
         command: HostCommand,
     ) -> Result<HostCommandResponse, JeopardyError> {
-        if self.host_password != host_password {
+        if !self.check_password(&host_password) {
             return Err(JeopardyError::IncorrectHostPassword);
         }
         let result = match command {
