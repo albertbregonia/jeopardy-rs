@@ -41,4 +41,5 @@ pub trait Manager {
     fn add(&mut self, id: &str, entry: Self::Entry) -> Result<(), ManagerError>;
     fn remove(&mut self, id: &str) -> Result<Self::Entry, ManagerError>;
     fn len(&self) -> Result<usize, ManagerError>;
+    fn is_empty(&self) -> Result<bool, ManagerError>;
 }

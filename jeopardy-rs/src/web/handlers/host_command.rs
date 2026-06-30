@@ -49,13 +49,13 @@ fn is_valid_host_request(
     lobby_id: &str,
     request: &HostRequest,
 ) -> bool {
-    let lobby_id_ok = validator.is_valid_lobby_id(&lobby_id);
+    let lobby_id_ok = validator.is_valid_lobby_id(lobby_id);
     let lobby_pw_ok = validator.is_valid_lobby_password(&request.lobby_password);
     let host_pw_ok = if let JeopardyCommand::Host {
         ref host_password, ..
     } = request.command
     {
-        validator.is_valid_host_password(&host_password)
+        validator.is_valid_host_password(host_password)
     } else {
         tracing::info!("Request is not a host command. Host password validation skipped");
         true

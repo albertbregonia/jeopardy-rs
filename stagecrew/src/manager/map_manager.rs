@@ -52,6 +52,10 @@ impl<E: ManagerEntry> Manager for MapManager<E> {
     fn len(&self) -> Result<usize, ManagerError> {
         Ok(self.lobbies.len())
     }
+
+    fn is_empty(&self) -> Result<bool, ManagerError> {
+        Ok(self.len()? == 0)
+    }
 }
 
 #[cfg(test)]
@@ -190,5 +194,20 @@ mod map_manager_tests {
             result,
             Err(ManagerError::EntryNotFound(id)) if id == invalid_id
         ))
+    }
+
+    #[tokio::test]
+    async fn GIVEN_entry_WHEN_is_empty_THEN_ok() {
+        // GIVEN
+        let mut manager = MapManager::default();
+        
+        // WHEN / THEN
+        assert!(manager.is_empty().unwrap()); // is_empty is infallible for MapManager so no negative tests
+
+        let id = "1".to_string();
+        let entry = PasswordProtectedLobby::with_test_game(id.clone(), "".to_string());
+        manager.add(&id, entry).unwrap();
+        
+        assert_eq!(false, manager.is_empty().unwrap());
     }
 }

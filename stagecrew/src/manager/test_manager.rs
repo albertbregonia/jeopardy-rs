@@ -125,6 +125,18 @@ pub mod test_manager_constructs {
             self.failure_config.lock().unwrap().valid_operation_count += 1;
             result
         }
+
+        fn is_empty(&self) -> Result<bool, ManagerError> {
+            let failure = Err(ManagerError::Dependency(
+                TestManagerError::TestInducedError.into(),
+            ));
+            if self.fail() {
+                return failure;
+            }
+            let result = self.manager.is_empty();
+            self.failure_config.lock().unwrap().valid_operation_count += 1;
+            result
+        }
     }
 }
 
@@ -147,6 +159,7 @@ mod test_manager_tests {
         assert!(matches!(manager.has(""), Err(ManagerError::Dependency(..))));
         assert!(matches!(manager.get(""), Err(ManagerError::Dependency(..))));
         assert!(matches!(manager.len(), Err(ManagerError::Dependency(..))));
+        assert!(matches!(manager.is_empty(), Err(ManagerError::Dependency(..))));
         assert!(matches!(
             manager.add(
                 "",
@@ -164,12 +177,12 @@ mod test_manager_tests {
     async fn GIVEN_never_fail_WHEN_manager_THEN_ok() {
         // GIVEN
         let mut manager = TestManager::<PasswordProtectedLobby<TestGame>>::default();
-        let n = 4000; // 4000 so that n/4 operations divides nicely
         manager.set_never_fail();
 
         // WHEN
-        for _ in 0..n / 4 {
+        for _ in 0..u16::MAX { // i can't do usize::MAX bc it would take too long
             // these should all pass normally
+            assert!(matches!(manager.is_empty(), Ok(true)));
             assert!(matches!(
                 manager.add(
                     "",
@@ -177,11 +190,12 @@ mod test_manager_tests {
                 ),
                 Ok(())
             ));
-            assert!(manager.has("").is_ok());
+            assert!(matches!(manager.has(""), Ok(true)));
             assert!(matches!(
                 manager.len(),
                 Ok(len) if len == 1
             ));
+            assert!(matches!(manager.is_empty(), Ok(false)));
             assert!(matches!(
                 manager.remove(""),
                 Ok(entry) if entry.id() == ""
@@ -193,11 +207,12 @@ mod test_manager_tests {
     async fn GIVEN_n_operations_WHEN_manager_THEN_ok() {
         // GIVEN
         let mut manager = TestManager::<PasswordProtectedLobby<TestGame>>::default();
-        let n = 400; // 400 so that n/4 operations divides nicely
+        let n = 600; // 600 so that n/6 operations divides nicely
         manager.set_fail_after_n(n);
 
         // WHEN
-        for _ in 0..n / 4 {
+        for _ in 0..n / 6 {
+            assert!(matches!(manager.is_empty(), Ok(true)));
             // these should all pass normally
             assert!(matches!(
                 manager.add(
@@ -211,6 +226,7 @@ mod test_manager_tests {
                 manager.len(),
                 Ok(len) if len == 1
             ));
+            assert!(matches!(manager.is_empty(), Ok(false)));
             assert!(matches!(
                 manager.remove(""),
                 Ok(entry) if entry.id() == ""

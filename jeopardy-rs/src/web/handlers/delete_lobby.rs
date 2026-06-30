@@ -34,7 +34,7 @@ fn is_valid_delete_lobby_request(
     lobby_id: &str,
     request: &DeleteLobbyRequest,
 ) -> bool {
-    let lobby_id_ok = validator.is_valid_lobby_id(&lobby_id);
+    let lobby_id_ok = validator.is_valid_lobby_id(lobby_id);
     let lobby_pw_ok = validator.is_valid_lobby_password(&request.lobby_password);
     let host_pw_ok = validator.is_valid_host_password(&request.host_password);
     tracing::info!(
@@ -98,7 +98,7 @@ pub async fn delete_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(DeleteLobbyResponse {
                         request_id,
-                        error: Some(format!("Internal Server Error. Please try again later.")),
+                        error: Some("Internal Server Error. Please try again later.".to_string()),
                     }),
                 );
             }
@@ -157,7 +157,7 @@ pub async fn delete_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(DeleteLobbyResponse {
                 request_id,
-                error: Some(format!("Internal Server Error. Please try again later.")),
+                error: Some("Internal Server Error. Please try again later.".to_string()),
             }),
         );
     }
