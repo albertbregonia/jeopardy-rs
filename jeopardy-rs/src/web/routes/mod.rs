@@ -1,11 +1,11 @@
 use axum::{
     Router,
-    routing::{delete, post},
+    routing::{delete, patch, post},
 };
 
 use crate::{
     server::JeopardyServerState,
-    web::handlers::{create_lobby, delete_lobby},
+    web::handlers::{create_lobby, delete_lobby, handle_host_command},
 };
 
 pub const LOBBY_CREATE_PATH: &str = "/lobbies"; // with POST
@@ -16,4 +16,5 @@ pub fn routes() -> Router<JeopardyServerState> {
     Router::new()
         .route(LOBBY_CREATE_PATH, post(create_lobby))
         .route(LOBBY_LIFECYLCE_PATH, delete(delete_lobby))
+        .route(HOST_API_PATH, patch(handle_host_command))
 }

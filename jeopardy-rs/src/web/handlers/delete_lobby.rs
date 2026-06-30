@@ -83,12 +83,12 @@ pub async fn delete_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
         Ok(lobby) => lobby,
         Err(e) => match e {
             ManagerError::EntryNotFound(_) => {
-                tracing::warn!("Requested lobby not found");
+                tracing::warn!("Requested lobby not found. Possibly already deleted.");
                 return (
                     StatusCode::NOT_FOUND,
                     Json(DeleteLobbyResponse {
                         request_id,
-                        error: Some(format!("'{lobby_id}' not found")),
+                        error: Some(format!("'{lobby_id}' not found. Possibly already deleted.")),
                     }),
                 );
             }
@@ -254,9 +254,9 @@ mod delete_lobby_tests {
     async fn GIVEN_valid_force_delete_lobby_request_WHEN_delete_lobby_THEN_ok() {
         // GIVEN
         let create_lobby_request = CreateLobbyRequest {
-            lobby_name: "test".to_string(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server(Some(create_lobby_request.clone())).await;
@@ -293,9 +293,9 @@ mod delete_lobby_tests {
     async fn GIVEN_invalid_format_delete_lobby_request_WHEN_delete_lobby_THEN_error() {
         // GIVEN
         let create_lobby_request = CreateLobbyRequest {
-            lobby_name: "test".to_string(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server(Some(create_lobby_request.clone())).await;
@@ -354,9 +354,9 @@ mod delete_lobby_tests {
     async fn GIVEN_nonexistant_lobby_delete_lobby_request_WHEN_delete_lobby_THEN_error() {
         // GIVEN
         let create_lobby_request = CreateLobbyRequest {
-            lobby_name: "test".to_string(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server(Some(create_lobby_request.clone())).await;
@@ -364,7 +364,7 @@ mod delete_lobby_tests {
         // WHEN
         let (status_code, response) = super::delete_lobby(
             State(state.clone()),
-            Path("missing".to_string()), // doesn't exist in the map
+            Path("MISSING".to_string()), // doesn't exist in the map
             Extension(Uuid::new_v4()),
             Json(DeleteLobbyRequest {
                 force: true,
@@ -398,9 +398,9 @@ mod delete_lobby_tests {
     async fn GIVEN_incorrect_lobby_password_delete_lobby_request_WHEN_delete_lobby_THEN_error() {
         // GIVEN
         let create_lobby_request = CreateLobbyRequest {
-            lobby_name: "test".to_string(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server(Some(create_lobby_request.clone())).await;
@@ -412,7 +412,7 @@ mod delete_lobby_tests {
             Extension(Uuid::new_v4()),
             Json(DeleteLobbyRequest {
                 force: true,
-                lobby_password: "incorrect".to_string(),
+                lobby_password: "INCORRECT".to_string(),
                 host_password: create_lobby_request.host_password,
             }),
         )
@@ -440,9 +440,9 @@ mod delete_lobby_tests {
     async fn GIVEN_incorrect_host_password_delete_lobby_request_WHEN_delete_lobby_THEN_error() {
         // GIVEN
         let create_lobby_request = CreateLobbyRequest {
-            lobby_name: "test".to_string(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server(Some(create_lobby_request.clone())).await;
@@ -455,7 +455,7 @@ mod delete_lobby_tests {
             Json(DeleteLobbyRequest {
                 force: true,
                 lobby_password: create_lobby_request.lobby_password,
-                host_password: "incorrect".to_string(),
+                host_password: "INCORRECT".to_string(),
             }),
         )
         .await;
@@ -484,9 +484,9 @@ mod delete_lobby_tests {
     async fn GIVEN_check_host_password_with_shutdown_lobby_WHEN_delete_lobby_THEN_ok() {
         // GIVEN
         let create_lobby_request = CreateLobbyRequest {
-            lobby_name: "test".to_string(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server(Some(create_lobby_request.clone())).await;
@@ -533,9 +533,9 @@ mod delete_lobby_tests {
     async fn GIVEN_check_nonempty_with_shutdown_lobby_WHEN_delete_lobby_THEN_ok() {
         // GIVEN
         let create_lobby_request = CreateLobbyRequest {
-            lobby_name: "test".to_string(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server(Some(create_lobby_request.clone())).await;
@@ -584,13 +584,13 @@ mod delete_lobby_tests {
     async fn GIVEN_failing_manager_during_check_exist_WHEN_delete_lobby_THEN_error() {
         // GIVEN
         let create_lobby_request = CreateLobbyRequest {
-            lobby_name: "test".to_string(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server_with_test_manager(Some(create_lobby_request.clone())).await;
-        state.manager().write().await.set_fail_after_n(0); // prevent lookup from passing
+        state.manager().write().await.set_always_fail(); // prevent lookup from passing
 
         // WHEN
         let (status_code, response) = super::delete_lobby(
@@ -624,9 +624,9 @@ mod delete_lobby_tests {
     async fn GIVEN_failing_manager_during_delete_WHEN_delete_lobby_THEN_error() {
         // GIVEN
         let create_lobby_request = CreateLobbyRequest {
-            lobby_name: "test".to_string(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server_with_test_manager(Some(create_lobby_request.clone())).await;

@@ -288,9 +288,9 @@ mod create_lobby_tests {
     #[tokio::test]
     async fn GIVEN_valid_create_lobby_request_WHEN_create_lobby_THEN_success() {
         new_test_server(Some(CreateLobbyRequest {
-            lobby_name: "test".to_string(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         }))
         .await;
@@ -299,9 +299,9 @@ mod create_lobby_tests {
     #[tokio::test]
     async fn GIVEN_invalid_format_create_lobby_request_WHEN_create_lobby_THEN_error() {
         // GIVEN
-        let valid_lobby_name = "test".to_string();
-        let valid_lobby_password = "test".to_string();
-        let valid_host_password = "test".to_string();
+        let valid_lobby_name = "lobby_name".to_string();
+        let valid_lobby_password = "lobby_password".to_string();
+        let valid_host_password = "host_password".to_string();
         let state = new_test_server(None).await;
 
         for i in 0..3 {
@@ -358,7 +358,7 @@ mod create_lobby_tests {
     async fn GIVEN_invalid_jeopardy_config_WHEN_create_lobby_THEN_error() {
         // GIVEN
         let state = new_test_server(None).await;
-        let lobby_name = "test".to_string();
+        let lobby_name = "lobby_name".to_string();
 
         // WHEN
         let (status_code, response) = super::create_lobby(
@@ -366,8 +366,8 @@ mod create_lobby_tests {
             Extension(Uuid::new_v4()),
             Json(CreateLobbyRequest {
                 lobby_name: lobby_name.clone(),
-                lobby_password: "test".to_string(),
-                host_password: "test".to_string(),
+                lobby_password: "lobby_password".to_string(),
+                host_password: "host_password".to_string(),
                 config: JeopardyConfig::invalid_default(), // test function (not in actual API)
             }),
         )
@@ -389,13 +389,12 @@ mod create_lobby_tests {
     #[tokio::test]
     async fn GIVEN_duplicate_create_lobby_request_WHEN_create_lobby_THEN_error() {
         // GIVEN
-        // create lobby request
         let create_lobby_request = CreateLobbyRequest {
-            lobby_name: "test".to_string(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_name: "lobby_name".to_string(), // create a lobby to conflict with
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
-        }; // create a lobby to conflict with
+        };
         let state = new_test_server(Some(create_lobby_request.clone())).await;
         let manager_len_before = state.manager().read().await.len().unwrap();
 
@@ -417,8 +416,9 @@ mod create_lobby_tests {
                 ..
             })
         ));
+        // ensure unchanged (can't use has(..) bc it's a duplicate request)
         let manager_len_after = state.manager().read().await.len().unwrap();
-        assert_eq!(manager_len_before, manager_len_after); // ensure unchanged
+        assert_eq!(manager_len_before, manager_len_after);
     }
 
     // internal server error checks
@@ -427,8 +427,8 @@ mod create_lobby_tests {
     async fn GIVEN_failing_manager_during_check_conflict_WHEN_create_lobby_THEN_error() {
         // GIVEN
         let state = new_test_server_with_test_manager(None).await;
-        state.manager().write().await.set_fail_after_n(0); // prevent lobby lookup from passing
-        let lobby_name = "test".to_string();
+        state.manager().write().await.set_always_fail(); // prevent lobby lookup from passing
+        let lobby_name = "lobby_name".to_string();
 
         // WHEN
         let (status_code, result) = super::create_lobby(
@@ -436,8 +436,8 @@ mod create_lobby_tests {
             Extension(Uuid::new_v4()),
             Json(CreateLobbyRequest {
                 lobby_name: lobby_name.clone(),
-                lobby_password: "test".to_string(),
-                host_password: "test".to_string(),
+                lobby_password: "lobby_password".to_string(),
+                host_password: "host_password".to_string(),
                 config: JeopardyConfig::test_default(),
             }),
         )
@@ -462,7 +462,7 @@ mod create_lobby_tests {
         // GIVEN
         let state = new_test_server_with_test_manager(None).await;
         state.manager().write().await.set_fail_after_n(1); // let the lobby lookup pass but let the creation fail
-        let lobby_name = "test".to_string();
+        let lobby_name = "lobby_name".to_string();
 
         // WHEN
         let (status_code, result) = super::create_lobby(
@@ -470,8 +470,8 @@ mod create_lobby_tests {
             Extension(Uuid::new_v4()),
             Json(CreateLobbyRequest {
                 lobby_name: lobby_name.clone(),
-                lobby_password: "test".to_string(),
-                host_password: "test".to_string(),
+                lobby_password: "lobby_password".to_string(),
+                host_password: "host_password".to_string(),
                 config: JeopardyConfig::test_default(),
             }),
         )
@@ -496,11 +496,11 @@ mod create_lobby_tests {
     #[tokio::test]
     async fn GIVEN_empty_lobby_WHEN_grace_period_cleanup_THEN_ok() {
         // GIVEN
-        let lobby_name = "test".to_string();
+        let lobby_name = "lobby_name".to_string();
         let state = new_test_server(Some(CreateLobbyRequest {
             lobby_name: lobby_name.clone(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         }))
         .await;
@@ -518,15 +518,14 @@ mod create_lobby_tests {
     #[tokio::test]
     async fn GIVEN_nonempty_lobby_WHEN_grace_period_cleanup_THEN_ok() {
         // GIVEN
-        let lobby_name = "test".to_string();
+        let lobby_name = "lobby_name".to_string();
         let request = CreateLobbyRequest {
             lobby_name: lobby_name.clone(),
-            lobby_password: "test".to_string(),
-            host_password: "test".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let player_id = "test_player".to_string();
-        let (state, _) = new_test_server_with_player(request, player_id.clone()).await;
+        let (state, _) = new_test_server_with_player(request, "test_player".to_string()).await;
 
         // WHEN
         // wait for lobby cleanup task to wake up and no-op

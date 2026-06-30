@@ -1392,7 +1392,7 @@ mod handler_tests {
         let init_points = 100;
         player.points = init_points;
 
-        let host_commands = vec![
+        let host_commands = [
             // order matters here
             HostCommand::GetBuzzerQueue,
             HostCommand::ClearBuzzerQueue,
