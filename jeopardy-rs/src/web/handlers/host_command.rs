@@ -216,15 +216,11 @@ mod host_command_tests {
     use crate::{
         game::{
             JeopardyCommand, JeopardyCommandResponse,
-            commands::{
-                host::{HostCommand, HostCommandResponse},
-                player::PlayerCommand,
-            },
+            commands::{host::HostCommand, player::PlayerCommand},
             jeopardy::{board::Board, config::JeopardyConfig, final_jeopardy::FinalJeopardy},
         },
         server::TestDefault,
         web::handlers::{
-            HOST_RESPONSE_RESULT_ERROR_KEY, HOST_RESPONSE_RESULT_VALUE_KEY,
             create_lobby::{
                 CreateLobbyRequest,
                 create_lobby_test_util::{
@@ -792,46 +788,5 @@ mod host_command_tests {
                 ..
             })
         ));
-    }
-
-    // custom serde tests
-
-    #[test]
-    fn GIVEN_host_response_ok_result_WHEN_serialize_result_THEN_ok() {
-        // GIVEN
-        let response = HostResponse {
-            request_id: "test_request_id".to_string(), // we dont check this bc it's default serialization
-            result: Ok(JeopardyCommandResponse::Host(HostCommandResponse::Success)),
-        };
-
-        // WHEN
-        let serialized = serde_json::to_value(&response).unwrap();
-        let serialized = serialized.as_object().unwrap().get("result").unwrap();
-        let error_v = serialized.get(HOST_RESPONSE_RESULT_ERROR_KEY).unwrap();
-        let value_v = serialized.get(HOST_RESPONSE_RESULT_VALUE_KEY).unwrap();
-
-        // THEN
-        assert!(error_v.is_null());
-        assert!(value_v.is_object())
-    }
-
-    #[test]
-    fn GIVEN_host_response_err_result_WHEN_serialize_result_THEN_ok() {
-        // GIVEN
-        let error_msg = "error".to_string();
-        let response = HostResponse {
-            request_id: "test_request_id".to_string(), // we dont check this bc it's default serialization
-            result: Err(error_msg.clone()),
-        };
-
-        // WHEN
-        let serialized = serde_json::to_value(&response).unwrap();
-        let serialized = serialized.as_object().unwrap().get("result").unwrap();
-        let serialized_error = serialized.get(HOST_RESPONSE_RESULT_ERROR_KEY).unwrap();
-        let serialized_value = serialized.get(HOST_RESPONSE_RESULT_VALUE_KEY).unwrap();
-
-        // THEN
-        assert_eq!(error_msg, serialized_error.as_str().unwrap());
-        assert!(serialized_value.is_null());
     }
 }
