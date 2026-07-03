@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{
     game::{JeopardyCommand, JeopardyCommandResponse, JeopardyError},
     server::{CredsValidatorGeneric, GenericJeopardyServerState, ManagerGeneric},
-    web::handlers::validators::CredsValidator,
+    web::handlers::{serialize_result, validators::CredsValidator},
 };
 use stagecrew::manager::{ManagerEntry, ManagerError};
 
@@ -22,26 +22,8 @@ pub struct HostRequest {
 #[derive(Serialize)]
 pub struct HostResponse {
     pub request_id: String,
-    #[serde(serialize_with = "serialize_host_response_result")]
+    #[serde(serialize_with = "serialize_result")]
     pub result: Result<JeopardyCommandResponse, String>, // command response or error msg
-}
-
-const HOST_RESPONSE_RESULT_ERROR_KEY: &str = "error";
-const HOST_RESPONSE_RESULT_VALUE_KEY: &str = "value";
-
-fn serialize_host_response_result<S: serde::Serializer>(
-    result: &Result<JeopardyCommandResponse, String>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    // we want to use result internally
-    // but outwardly, we don't want to have API calls have to handle
-    // "Err" and "Ok" Rust formats bc that's too low level.
-    // therefore, make it standard JSON and use Option<> so we get nulls
-    serde_json::json!({
-        HOST_RESPONSE_RESULT_VALUE_KEY: result.as_ref().ok(),
-        HOST_RESPONSE_RESULT_ERROR_KEY: result.as_ref().err(),
-    })
-    .serialize(serializer)
 }
 
 fn is_valid_host_request(
@@ -242,16 +224,14 @@ mod host_command_tests {
         },
         server::TestDefault,
         web::handlers::{
+            HOST_RESPONSE_RESULT_ERROR_KEY, HOST_RESPONSE_RESULT_VALUE_KEY,
             create_lobby::{
                 CreateLobbyRequest,
                 create_lobby_test_util::{
                     new_test_server, new_test_server_with_player, new_test_server_with_test_manager,
                 },
             },
-            host_command::{
-                HOST_RESPONSE_RESULT_ERROR_KEY, HOST_RESPONSE_RESULT_VALUE_KEY, HostRequest,
-                HostResponse,
-            },
+            host_command::{HostRequest, HostResponse},
         },
     };
 

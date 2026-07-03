@@ -1,6 +1,6 @@
 use axum::{
     Extension,
-    extract::{State, WebSocketUpgrade, ws::WebSocket},
+    extract::{State, WebSocketUpgrade},
     response::IntoResponse,
 };
 use stagecrew::conn::{JsonConn, TextTransport};

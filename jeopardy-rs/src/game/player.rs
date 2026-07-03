@@ -20,7 +20,7 @@ pub enum JeopardyPlayerError {
         "Invalid wager: {wager}. Must be within range [0-{current_points}] (inclusive). If your points are negative, you can wager enough to get to 0"
     )]
     InvalidWager { wager: i32, current_points: i32 },
-    #[error("")]
+    #[error("Connection lost: Unable to communicate with Player")]
     ConnectionLost,
 }
 

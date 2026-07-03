@@ -98,28 +98,26 @@ where
 // publicly accessible mock for use in unit tests
 // receiver: allows us to mock JSON requests coming in
 // sender: allows us to see what gets sent to the client
-#[cfg(test)]
-mod json_conn_test_constructs {
+#[cfg(feature = "test-util")]
+pub mod json_conn_test_constructs {
     use super::*;
     use tokio::sync::mpsc::{Receiver, Sender};
 
-    pub struct MockConn<T: Serialize> {
-        pub receiver: Receiver<T>,
-        pub sender: Sender<String>,
+    pub struct MockTextTransport<T: Serialize> {
+        pub input_receiver: Receiver<T>,
+        pub output_sender: Sender<String>,
     }
 
     #[derive(Debug, Error)]
     pub enum MockError {
         #[error(transparent)]
         Derivative(#[from] Box<dyn Error>),
-        #[error("Generic Error")]
-        Generic,
     }
 
-    impl<T: Serialize> TextTransport for MockConn<T> {
+    impl<T: Serialize> TextTransport for MockTextTransport<T> {
         type Error = MockError;
         async fn read_text(&mut self) -> Option<Result<Bytes, Self::Error>> {
-            let msg = self.receiver.recv().await?;
+            let msg = self.input_receiver.recv().await?;
             let serialized = match serde_json::to_vec(&msg) {
                 Ok(bin) => bin,
                 Err(e) => return Some(Err(MockError::Derivative(e.into()))),
@@ -128,7 +126,7 @@ mod json_conn_test_constructs {
         }
 
         async fn send_text(&mut self, msg: &str) -> Result<(), Self::Error> {
-            self.sender
+            self.output_sender
                 .send(msg.to_string())
                 .await
                 .map_err(|e| MockError::Derivative(e.into()))?;
@@ -137,13 +135,10 @@ mod json_conn_test_constructs {
 
         async fn disconnect(self, reason: Option<ErrorReason>) -> Result<(), Self::Error> {
             // receiver and sender will be dropped automatically
-
-            // internal error is only used here to induce an error
-            if reason.is_some() {
-                Err(MockError::Generic)
-            } else {
-                Ok(())
-            }
+            self.output_sender
+                .send(format!("{reason:?}"))
+                .await
+                .map_err(|e| MockError::Derivative(e.into()))
         }
     }
 }
@@ -152,7 +147,7 @@ mod json_conn_test_constructs {
 #[allow(non_snake_case)]
 mod json_conn_tests {
     use super::*;
-    use crate::conn::json_conn_test_constructs::MockConn;
+    use crate::conn::json_conn_test_constructs::MockTextTransport;
     use serde::ser::Error;
     use serde::{Deserialize, Deserializer};
     use tokio::sync::mpsc;
@@ -205,15 +200,15 @@ mod json_conn_tests {
     // tbh some of these tests are simply for the sake of testing (ie. disconnect)
 
     fn new_mock_conn_with_io_hooks() -> (
-        JsonConn<MockConn<TestType>, TestType, TestType>,
+        JsonConn<MockTextTransport<TestType>, TestType, TestType>,
         mpsc::Sender<TestType>,
         mpsc::Receiver<String>,
     ) {
         let (input_sender, input_receiver) = mpsc::channel(1);
         let (output_sender, output_receiver) = mpsc::channel(1);
-        let mock_ws = JsonConn::new(MockConn {
-            receiver: input_receiver,
-            sender: output_sender,
+        let mock_ws = JsonConn::new(MockTextTransport {
+            input_receiver,
+            output_sender,
         });
         (mock_ws, input_sender, output_receiver)
     }
@@ -313,7 +308,7 @@ mod json_conn_tests {
     #[tokio::test]
     async fn GIVEN_mock_conn_WHEN_disconnect_THEN_ok() {
         // GIVEN
-        let (mock_ws, _, _) = new_mock_conn_with_io_hooks();
+        let (mock_ws, _, _output_receiver) = new_mock_conn_with_io_hooks();
 
         // WHEN
         let result = mock_ws.disconnect(None).await;
@@ -323,16 +318,12 @@ mod json_conn_tests {
     }
 
     #[tokio::test]
-    async fn GIVEN_mock_conn_WHEN_disconnect_THEN_error() {
+    async fn GIVEN_disconnected_mock_conn_WHEN_disconnect_THEN_error() {
         // GIVEN
-        let (mock_ws, _, _) = new_mock_conn_with_io_hooks();
+        let (mock_ws, _, _) = new_mock_conn_with_io_hooks(); // drop receiver
 
         // WHEN
-        let reason = Some(ErrorReason {
-            internal_error: true,
-            reason: "".to_string(),
-        });
-        let result = mock_ws.disconnect(reason).await;
+        let result = mock_ws.disconnect(None).await;
 
         // THEN
         assert!(matches!(result, Err(JsonConnError::Dependency(..))));

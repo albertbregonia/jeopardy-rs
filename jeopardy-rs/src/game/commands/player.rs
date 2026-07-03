@@ -28,7 +28,7 @@ pub enum PlayerCommand {
 /// Most of them will send `PlayerCommandResponse::Success` which is equivalently `Ok(())`.
 /// Otherwise, the variant mirrors the command:
 /// ie. `PlayerCommand::GetPoints` maps to `HostCommandResponse::GetPoints(i32)`
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub enum PlayerCommandResponse {
     Success,
     Refresh(JeopardyDisplayEvent),
