@@ -1,9 +1,10 @@
-use std::error::Error;
+use std::{error::Error, time::Duration};
 
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use stagecrew::conn::{ErrorReason, JsonConn, TextTransport};
 use thiserror::Error;
+use tokio::time::timeout;
 
 // we consider this file to be part of the "top level" handlers
 // as this defines the websocket API for handling players.
@@ -169,11 +170,25 @@ where
                 ))
             })
     }
+
+    async fn read_request_with_timeout(
+        &mut self,
+        max_timeout: Duration,
+    ) -> Result<PlayerRequest, PlayerHandlerError> {
+        let request = timeout(max_timeout, self.json_ws.read_json())
+            .await
+            .map_err(|_| UserError::RequestTimeout)?
+            .ok_or(UserError::UnexpectedDisconnect)?
+            .map_err(|e| InternalError::Dependency(anyhow!("Failed to read request: {e}")))?; // with our MockConn we cannot unit test this case
+        Ok(request)
+    }
 }
 
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod player_conn_tests {
+
+    use std::time::Duration;
 
     use stagecrew::conn::json_conn_test_constructs::{MockTextTransport, new_mock_json_conn};
     use tokio::sync::mpsc;
@@ -187,7 +202,8 @@ mod player_conn_tests {
         web::handlers::{
             create_lobby::{CreateLobbyRequest, create_lobby_test_util::new_test_server},
             player::{
-                InternalError, LoginError, PlayerConn, PlayerRequest, PlayerResponse, UserError,
+                InternalError, LoginCredentials, LoginError, PlayerConn, PlayerHandlerError,
+                PlayerRequest, PlayerResponse, UserError,
             },
         },
     };
@@ -357,5 +373,85 @@ mod player_conn_tests {
 
         // THEN
         assert!(matches!(result, Err(InternalError::Dependency(..))));
+    }
+
+    #[tokio::test]
+    async fn GIVEN_no_timeout_player_conn_WHEN_read_request_with_timeout_THEN_ok() {
+        // GIVEN
+        let create_lobby_request = CreateLobbyRequest {
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
+            config: JeopardyConfig::test_default(),
+        };
+        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let (mut player_conn, input_sender, _) = new_test_player_conn(state).await;
+        let login_request = LoginCredentials {
+            // derive login request from create lobby request
+            lobby_id: create_lobby_request.lobby_name,
+            lobby_password: create_lobby_request.lobby_password,
+            username: "username".to_string(),
+        };
+        input_sender // send valid request to be read
+            .send(PlayerRequest::Login(login_request.clone()))
+            .await
+            .unwrap();
+
+        // WHEN
+        let request = player_conn
+            .read_request_with_timeout(Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        // THEN
+        let PlayerRequest::Login(LoginCredentials {
+            lobby_id,
+            lobby_password,
+            username,
+        }) = request
+        else {
+            panic!("Unexpected PlayerRequest variant: {request:?}");
+        };
+        assert_eq!(lobby_id, login_request.lobby_id);
+        assert_eq!(lobby_password, login_request.lobby_password);
+        assert_eq!(username, login_request.username);
+    }
+
+    #[tokio::test]
+    async fn GIVEN_timeout_player_conn_WHEN_read_request_with_timeout_THEN_error() {
+        // GIVEN
+        let state = default_server_state_with_lobby().await;
+        // we don't drop the input sender so that we have a valid connection but player_conn times out bc we don't send anything
+        let (mut player_conn, _input_sender, _) = new_test_player_conn(state).await;
+
+        // WHEN
+        let result = player_conn
+            .read_request_with_timeout(Duration::from_secs(1))
+            .await;
+
+        // THEN
+        assert!(matches!(
+            result,
+            Err(PlayerHandlerError::User(UserError::RequestTimeout))
+        ))
+    }
+
+    #[tokio::test]
+    async fn GIVEN_disconnected_player_conn_WHEN_read_request_with_timeout_THEN_error() {
+        // GIVEN
+        let state = default_server_state_with_lobby().await;
+        // drop both input sender and output receiver so that the underlying read_json() errors
+        let (mut player_conn, _, _) = new_test_player_conn(state).await;
+
+        // WHEN
+        let result = player_conn
+            .read_request_with_timeout(Duration::from_secs(1))
+            .await;
+
+        // THEN
+        assert!(matches!(
+            result,
+            Err(PlayerHandlerError::User(UserError::UnexpectedDisconnect))
+        ));
     }
 }

@@ -489,10 +489,10 @@ mod handler_tests {
     }
 
     #[test]
-    fn GIVEN_empty_jeopardy_handler_WHEN_new_THEN_ok() {
+    fn GIVEN_empty_jeopardy_handler_WHEN_new_THEN_error() {
         // GIVEN
         let invalid_config = JeopardyConfig::invalid_default();
-        let host_password = ""; // no validation
+        let host_password = "";
 
         // WHEN
         let result = Jeopardy::new(host_password, invalid_config);
@@ -519,11 +519,7 @@ mod handler_tests {
 
         // THEN
         assert_eq!(scoreboard.len(), n); // ensure same size
-        for i in 0..scoreboard.len() - 1 {
-            let (a_points, _) = scoreboard[i];
-            let (b_points, _) = scoreboard[i + 1];
-            assert!(a_points > b_points); // ensure descending in terms of points
-        }
+        assert!(scoreboard.is_sorted_by(|a, b| a > b)); // ensure descending in terms of points
     }
 
     /// given a count `n`, creates adds players to a player map with an id from 1-10 (inclusive)
@@ -551,8 +547,7 @@ mod handler_tests {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
         jeopardy.display = JeopardyDisplayEvent::TextCard {
-            // ensure buzzing doesn't no-op
-            title: "".to_string(),
+            title: "".to_string(), // ensure buzzing doesn't no-op
             content: "".to_string(),
         };
         let n = 10;
@@ -600,7 +595,7 @@ mod handler_tests {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
         jeopardy.display = JeopardyDisplayEvent::TextCard {
-            title: "".to_string(),
+            title: "".to_string(), // ensure buzzing doesn't no-op
             content: "".to_string(),
         };
         let n = 10;
@@ -624,7 +619,7 @@ mod handler_tests {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
         jeopardy.display = JeopardyDisplayEvent::TextCard {
-            title: "".to_string(),
+            title: "".to_string(), // ensure buzzing doesn't no-op
             content: "".to_string(),
         };
         let n = 10;
@@ -636,11 +631,11 @@ mod handler_tests {
         let result = jeopardy.add_player_to_buzzer_queue(&players, invalid_id.clone());
 
         // THEN
-        assert!(jeopardy.buzzer_queue.is_empty()); // ensure still empty
         assert!(matches!(
             result,
             Err(JeopardyError::PlayerForGivenIDNotFound(id)) if id == invalid_id
         ));
+        assert!(jeopardy.buzzer_queue.is_empty()); // ensure still empty
     }
 
     #[test]
@@ -655,7 +650,6 @@ mod handler_tests {
         let host_password = "";
         let mut jeopardy = Jeopardy::new(host_password, config).unwrap();
 
-        // WHEN
         for board_index in 0..jeopardy.config.boards().len() {
             let category_len = jeopardy.config.boards()[board_index].categories().len();
             for category_index in 0..category_len {
@@ -664,7 +658,7 @@ mod handler_tests {
                     .questions()
                     .len();
                 for question_index in 0..question_len {
-                    // lookup question
+                    // WHEN - lookup question
                     let (board, category, question) = jeopardy
                         .get_question(board_index, category_index, question_index)
                         .unwrap();

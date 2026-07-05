@@ -301,22 +301,24 @@ mod lobby_tests {
         // to be exhaustive, we test that every command fails
         // despite them all sharing the same helper
         let shutdown_result = lobby.shutdown().await;
-        let player_count_result = lobby.player_count().await;
-        let remove_player_result = lobby.remove_player("").await;
+        let add_player_result = lobby.add_player("", TestPlayer("".to_string())).await;
         let has_player_result = lobby.has_player("").await;
+        let remove_player_result = lobby.remove_player("").await;
+        let player_count_result = lobby.player_count().await;
         let game_event_result = lobby.send_game_event_and_wait(TestEvent::GetBool).await;
 
         // THEN
         assert!(matches!(shutdown_result, Err(LobbyError::ActorShutdown)));
-        assert!(matches!(
-            player_count_result,
-            Err(LobbyError::ActorShutdown)
-        ));
+        assert!(matches!(add_player_result, Err(LobbyError::ActorShutdown)));
+        assert!(matches!(has_player_result, Err(LobbyError::ActorShutdown)));
         assert!(matches!(
             remove_player_result,
             Err(LobbyError::ActorShutdown)
         ));
-        assert!(matches!(has_player_result, Err(LobbyError::ActorShutdown)));
+        assert!(matches!(
+            player_count_result,
+            Err(LobbyError::ActorShutdown)
+        ));
         assert!(matches!(game_event_result, Err(LobbyError::ActorShutdown)));
     }
 
