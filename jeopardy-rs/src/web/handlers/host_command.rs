@@ -251,9 +251,8 @@ mod host_command_tests {
             host_password: "host_password".to_string(),
             config,
         };
-        let player_id = "test_player".to_string();
-        let (state, _) =
-            new_test_server_with_player(create_lobby_request.clone(), player_id.clone()).await;
+        let player_id = "test_player";
+        let (state, _) = new_test_server_with_player(create_lobby_request.clone(), player_id).await;
 
         let commands = [
             HostCommand::GetBuzzerQueue,
@@ -262,11 +261,11 @@ mod host_command_tests {
             HostCommand::ShowFinalJeopardyQuestion,
             HostCommand::ShowFinalJeopardyAnswer,
             HostCommand::SetPoints {
-                player_id: player_id.clone(),
+                player_id: player_id.to_string(),
                 points: 100,
             },
             HostCommand::UpdatePoints {
-                player_id,
+                player_id: player_id.to_string(),
                 delta: -1,
             },
         ];
@@ -378,9 +377,8 @@ mod host_command_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let player_id = "test_player".to_string();
-        let (state, _) =
-            new_test_server_with_player(create_lobby_request.clone(), player_id.clone()).await;
+        let player_id = "test_player";
+        let (state, _) = new_test_server_with_player(create_lobby_request.clone(), player_id).await;
 
         let commands = [
             PlayerCommand::Buzz,
@@ -397,7 +395,7 @@ mod host_command_tests {
             let host_request = HostRequest {
                 lobby_password: create_lobby_request.lobby_password.clone(),
                 command: JeopardyCommand::Player {
-                    player_id: player_id.clone(),
+                    player_id: player_id.to_string(),
                     command,
                 },
             };
@@ -433,9 +431,8 @@ mod host_command_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let player_id = "test_player".to_string(); // we need a player to run PlayerCommand against
-        let (state, _) =
-            new_test_server_with_player(create_lobby_request.clone(), player_id.clone()).await;
+        let player_id = "test_player"; // we need a player to run PlayerCommand against
+        let (state, _) = new_test_server_with_player(create_lobby_request.clone(), player_id).await;
 
         for i in 0..3 {
             // switch which field has the invalid format
@@ -497,9 +494,8 @@ mod host_command_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let player_id = "test_player".to_string(); // we need a player to run PlayerCommand against
-        let (state, _) =
-            new_test_server_with_player(create_lobby_request.clone(), player_id.clone()).await;
+        let player_id = "test_player"; // we need a player to run PlayerCommand against
+        let (state, _) = new_test_server_with_player(create_lobby_request.clone(), player_id).await;
 
         for i in 0..3 {
             // switch which field has the invalid format
@@ -516,7 +512,7 @@ mod host_command_tests {
             let player_id = if i == 2 {
                 "".to_string()
             } else {
-                player_id.clone()
+                player_id.to_string()
             };
 
             // WHEN

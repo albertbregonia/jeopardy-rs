@@ -215,12 +215,12 @@ pub mod create_lobby_test_util {
     // returns the server state and mpsc::Receiver<_> to listen for broadcasts
     pub async fn new_test_server_with_player(
         create_lobby: CreateLobbyRequest,
-        player_id: String,
+        player_id: &str,
     ) -> (JeopardyServerState, mpsc::Receiver<JeopardyPlayerEvent>) {
         // GIVEN
         let state = new_test_server(Some(create_lobby.clone())).await;
         let (tx, rx) = mpsc::channel(1);
-        let player = JeopardyPlayer::new(player_id.clone(), tx);
+        let player = JeopardyPlayer::new(player_id.to_string(), tx);
         state
             .manager()
             .write()
@@ -228,7 +228,7 @@ pub mod create_lobby_test_util {
             .get(&create_lobby.lobby_name)
             .unwrap()
             .lobby() // add test player
-            .add_player(player_id.clone(), player)
+            .add_player(player_id, player)
             .await
             .unwrap();
         (state, rx)
@@ -525,7 +525,7 @@ mod create_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let (state, _) = new_test_server_with_player(request, "test_player".to_string()).await;
+        let (state, _) = new_test_server_with_player(request, "test_player").await;
 
         // WHEN
         // wait for lobby cleanup task to wake up and no-op

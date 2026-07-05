@@ -136,15 +136,15 @@ pub async fn delete_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
             // otherwise, continue
         }
         Err(e) => match e {
-            LobbyError::UserIDConflict(_) => {
+            LobbyError::ActorShutdown => {
+                tracing::warn!("Lobby already shutdown. No-op")
+            }
+            other => {
                 // we log this as an error!(..) bc it SHOULD NOT happen
                 // but in both cases if the operation didn't work,
                 // we're dropping the lobby anyways so it WILL get shut down
                 // so we continue
-                tracing::error!("Unexpected lobby error during lobby shutdown: {e}");
-            }
-            LobbyError::ActorShutdown => {
-                tracing::warn!("Lobby already shutdown. No-op")
+                tracing::error!("Unexpected lobby error during lobby shutdown: {other}");
             }
         },
     }

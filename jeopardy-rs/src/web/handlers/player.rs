@@ -15,7 +15,7 @@ use crate::{
     web::handlers::serialize_result,
 };
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginCredentials {
     lobby_id: String,
     lobby_password: String,
@@ -23,7 +23,8 @@ pub struct LoginCredentials {
 }
 
 // variants of what can be sent by the player over the websocket
-#[derive(Debug, Clone, Deserialize)]
+// note: serialize is required only for tests
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PlayerRequest {
     Login(LoginCredentials),
     Command(PlayerCommand),
@@ -174,7 +175,7 @@ where
 #[allow(non_snake_case)]
 mod player_conn_tests {
 
-    use stagecrew::conn::{JsonConn, json_conn_test_constructs::MockTextTransport};
+    use stagecrew::conn::json_conn_test_constructs::{MockTextTransport, new_mock_json_conn};
     use tokio::sync::mpsc;
 
     use crate::{
@@ -185,7 +186,9 @@ mod player_conn_tests {
         },
         web::handlers::{
             create_lobby::{CreateLobbyRequest, create_lobby_test_util::new_test_server},
-            player::{InternalError, LoginError, PlayerConn, PlayerResponse, UserError},
+            player::{
+                InternalError, LoginError, PlayerConn, PlayerRequest, PlayerResponse, UserError,
+            },
         },
     };
 
@@ -194,19 +197,12 @@ mod player_conn_tests {
     async fn new_test_player_conn<M: ManagerGeneric, C: CredsValidatorGeneric>(
         state: GenericJeopardyServerState<M, C>,
     ) -> (
-        PlayerConn<MockTextTransport<String>, M, C>,
-        mpsc::Sender<String>,
+        PlayerConn<MockTextTransport<PlayerRequest>, M, C>,
+        mpsc::Sender<PlayerRequest>,
         mpsc::Receiver<String>,
     ) {
-        // create mock JsonConn to simulate websocket
-        let (input_sender, input_receiver) = mpsc::channel(1);
-        let (output_sender, output_receiver) = mpsc::channel(1);
-        let transport = MockTextTransport {
-            input_receiver,
-            output_sender,
-        };
-        let json_ws = JsonConn::new(transport);
-        let player_conn = PlayerConn::new(state, json_ws);
+        let (mock_json_conn, input_sender, output_receiver) = new_mock_json_conn();
+        let player_conn = PlayerConn::new(state, mock_json_conn);
         (player_conn, input_sender, output_receiver)
     }
 

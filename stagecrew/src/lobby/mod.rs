@@ -42,8 +42,10 @@ pub trait Game: Send + 'static {
 
 #[derive(Debug, Error)]
 pub enum LobbyError {
-    #[error("User ID: '{0}' conflicts with another in the lobby")]
-    UserIDConflict(String),
+    #[error("Player ID: '{0}' conflicts with another in the lobby")]
+    PlayerIDConflict(String),
+    #[error("Player ID: '{0}' was not found in the lobby")]
+    PlayerIDNotFound(String),
     #[error("Lobby closed due to actor thread shutdown")]
     ActorShutdown,
 }

@@ -13,7 +13,7 @@ use tokio::{
 enum Command<G: Game> {
     HasPlayer(Responder<bool>, String),
     AddPlayer(Responder<Result<(), LobbyError>>, String, G::Player),
-    RemovePlayer(Responder<Option<G::Player>>, String),
+    RemovePlayer(Responder<Result<G::Player, LobbyError>>, String),
     PlayerCount(Responder<usize>),
     GameEvent(Responder<G::EventResponse>, G::Event),
     Shutdown(Responder<()>),
@@ -80,19 +80,19 @@ impl<G: Game> Lobby<G> {
         Ok(reply.await?)
     }
 
-    pub async fn has_player(&self, id: String) -> Result<bool, LobbyError> {
-        self.send_and_wait(|responder| Command::HasPlayer(responder, id))
+    pub async fn has_player(&self, id: &str) -> Result<bool, LobbyError> {
+        self.send_and_wait(|responder| Command::HasPlayer(responder, id.to_string()))
             .await
     }
 
-    pub async fn add_player(&self, id: String, player: G::Player) -> Result<(), LobbyError> {
-        self.send_and_wait(|responder| Command::AddPlayer(responder, id, player))
+    pub async fn add_player(&self, id: &str, player: G::Player) -> Result<(), LobbyError> {
+        self.send_and_wait(|responder| Command::AddPlayer(responder, id.to_string(), player))
             .await?
     }
 
-    pub async fn remove_player(&self, id: String) -> Result<Option<G::Player>, LobbyError> {
-        self.send_and_wait(|responder| Command::RemovePlayer(responder, id))
-            .await
+    pub async fn remove_player(&self, id: &str) -> Result<G::Player, LobbyError> {
+        self.send_and_wait(|responder| Command::RemovePlayer(responder, id.to_string()))
+            .await?
     }
 
     pub async fn player_count(&self) -> Result<usize, LobbyError> {
@@ -177,14 +177,16 @@ impl<G: Game> ActorLobby<G> {
         // any time a player's data could get overriden is bad for the Lobby
         // name validation should be at the caller level
         if self.has_player(&id) {
-            return Err(LobbyError::UserIDConflict(id));
+            return Err(LobbyError::PlayerIDConflict(id));
         }
         self.players.add(id, player);
         Ok(())
     }
 
-    fn remove_player(&mut self, id: String) -> Option<G::Player> {
-        self.players.remove(&id)
+    fn remove_player(&mut self, id: String) -> Result<G::Player, LobbyError> {
+        self.players
+            .remove(&id)
+            .ok_or(LobbyError::PlayerIDNotFound(id))
     }
 }
 
@@ -245,16 +247,18 @@ mod lobby_tests {
         }
     }
 
+    // shutdown() tests
+
     #[tokio::test]
     async fn GIVEN_lobby_WHEN_shutdown_THEN_ok() {
         // GIVEN
         let lobby = Lobby::default();
+        assert_eq!(false, lobby.is_shutdown());
 
         // WHEN
         let handle = lobby.shutdown().await.unwrap();
 
         // THEN
-        assert_eq!(false, lobby.is_shutdown()); // lobby.shutdown() just sends the signal
         handle.await.unwrap(); // wait until actually shut down
         assert!(lobby.is_shutdown());
     }
@@ -285,7 +289,7 @@ mod lobby_tests {
         ));
     }
 
-    #[tokio::test]
+    #[tokio::test] // this is an all encompassing negative test as they all have to pass through the same actor handler
     async fn GIVEN_already_shutdown_lobby_WHEN_send_event_THEN_error() {
         // GIVEN
         let lobby = Lobby::default();
@@ -298,8 +302,8 @@ mod lobby_tests {
         // despite them all sharing the same helper
         let shutdown_result = lobby.shutdown().await;
         let player_count_result = lobby.player_count().await;
-        let remove_player_result = lobby.remove_player("".to_string()).await;
-        let has_player_result = lobby.has_player("".to_string()).await;
+        let remove_player_result = lobby.remove_player("").await;
+        let has_player_result = lobby.has_player("").await;
         let game_event_result = lobby.send_game_event_and_wait(TestEvent::GetBool).await;
 
         // THEN
@@ -316,21 +320,26 @@ mod lobby_tests {
         assert!(matches!(game_event_result, Err(LobbyError::ActorShutdown)));
     }
 
+    // add player tests
+
     // moved to a helper because some operations require a player
     /// Adds a player and performs validation given a lobby
-    async fn add_player_to_lobby(player_id: String, lobby: &Lobby<TestGame>) {
-        // GIVEN - lobby
+    async fn add_player_to_lobby(player_id: &str, lobby: &Lobby<TestGame>) {
+        // GIVEN - initial state
         let count_before = lobby.player_count().await.unwrap();
+        let has_player = lobby.has_player(player_id).await.unwrap();
+        assert_eq!(false, has_player);
 
         // WHEN
         lobby // if there is an ID conflict, this will panic
-            .add_player(player_id.clone(), TestPlayer(player_id.clone()))
+            .add_player(player_id, TestPlayer(player_id.to_string()))
             .await
             .unwrap();
 
         // THEN
         let count_after = lobby.player_count().await.unwrap();
         assert_eq!(count_before + 1, count_after); // player was added
+
         let has_player = lobby.has_player(player_id).await.unwrap();
         assert!(has_player); // ensure has_player reflects player was created
     }
@@ -339,7 +348,8 @@ mod lobby_tests {
     async fn GIVEN_player_WHEN_add_player_THEN_ok() {
         // GIVEN
         let lobby = Lobby::default();
-        let player_id = "1".to_string();
+        let player_id = "1";
+
         // WHEN / THEN
         add_player_to_lobby(player_id, &lobby).await
     }
@@ -348,22 +358,113 @@ mod lobby_tests {
     async fn GIVEN_conflicting_player_id_WHEN_add_player_THEN_error() {
         // GIVEN
         let lobby = Lobby::default();
-        let player_id = "1".to_string();
-        add_player_to_lobby(player_id.clone(), &lobby).await;
+        let player_id = "1";
+        add_player_to_lobby(player_id, &lobby).await; // ensures expected init state 
         let count_before = lobby.player_count().await.unwrap();
 
         // WHEN
         let result = lobby
-            .add_player(player_id.clone(), TestPlayer(player_id.clone())) // add again with cloned ID
+            .add_player(player_id, TestPlayer(player_id.to_string())) // add again with cloned ID
             .await;
 
         // THEN
         assert!(matches!(
             result,
-            Err(LobbyError::UserIDConflict(conflict_id)) if conflict_id == player_id
+            Err(LobbyError::PlayerIDConflict(conflict_id)) if conflict_id == player_id
         ));
+
         let count_after = lobby.player_count().await.unwrap();
         assert_eq!(count_before, count_after); // no new player was added
+
+        let has_player = lobby.has_player(player_id).await.unwrap();
+        assert!(has_player); // existing player persists
+    }
+
+    // remove_player() tests
+
+    #[tokio::test]
+    async fn GIVEN_player_in_lobby_WHEN_remove_player_THEN_ok() {
+        // GIVEN
+        let lobby = Lobby::default();
+        let player_id = "1";
+        add_player_to_lobby(player_id, &lobby).await; // ensures expected init state
+        let count_before = lobby.player_count().await.unwrap();
+
+        // WHEN
+        let test_player = lobby.remove_player(player_id).await.unwrap();
+
+        // THEN
+        assert_eq!(player_id, test_player.id()); // same player was returned
+
+        let count_after = lobby.player_count().await.unwrap();
+        assert_eq!(count_before - 1, count_after); // player count went down bc of the removal
+
+        let has_player = lobby.has_player(player_id).await.unwrap();
+        assert_eq!(false, has_player); // ensure has_player reflects the removal
+    }
+
+    #[tokio::test]
+    async fn GIVEN_player_not_in_lobby_WHEN_remove_player_THEN_ok() {
+        // GIVEN
+        let lobby = Lobby::default();
+        // add dummy player, bc an empty lobby will always return empty even if logic is wrong
+        add_player_to_lobby("1", &lobby).await; // ensures expected init state
+        let invalid_id = "2";
+
+        // init state
+        let count_before = lobby.player_count().await.unwrap();
+        let has_player = lobby.has_player(invalid_id).await.unwrap();
+        assert_eq!(false, has_player);
+
+        // WHEN
+        let result = lobby.remove_player(invalid_id).await;
+
+        // THEN
+        assert!(matches!(result, Err(LobbyError::PlayerIDNotFound(id)) if id == invalid_id));
+
+        let count_after = lobby.player_count().await.unwrap();
+        assert_eq!(count_before, count_after); // player count is unchanged by the removal
+
+        let has_player = lobby.has_player(invalid_id).await.unwrap();
+        assert_eq!(false, has_player); // ensure has_player still reflects expected for the invalid ID
+    }
+
+    #[tokio::test] // both positive and negative test
+    async fn GIVEN_player_id_WHEN_has_player_THEN_ok() {
+        // GIVEN
+        let lobby = Lobby::default();
+        // add dummy player as an empty lobby will always return false for has_player()
+        let valid_id = "1";
+        let invalid_id = "2";
+        add_player_to_lobby(valid_id, &lobby).await;
+
+        // WHEN
+        let has_valid_player = lobby.has_player(valid_id).await.unwrap();
+        let has_invalid_player = lobby.has_player(invalid_id).await.unwrap(); // ID not in lobby
+
+        // THEN
+        assert!(has_valid_player);
+        assert_eq!(false, has_invalid_player);
+    }
+
+    #[tokio::test]
+    async fn GIVEN_lobby_WHEN_player_count_THEN_ok() {
+        // GIVEN
+        let lobby = Lobby::new(TestGame::default(), PlayerMap::new(), 1);
+        let count_before = lobby.player_count().await.unwrap();
+        assert_eq!(0, count_before); // ensure new lobby is empty
+
+        // WHEN
+        let expected_player_count = 10; // add n players
+        for i in 0..expected_player_count {
+            let player_id = i.to_string();
+            let player = TestPlayer(player_id.clone());
+            lobby.add_player(&player_id, player).await.unwrap();
+        }
+
+        // THEN
+        let count_after = lobby.player_count().await.unwrap();
+        assert_eq!(expected_player_count, count_after);
     }
 
     #[tokio::test]
@@ -379,84 +480,5 @@ mod lobby_tests {
 
         // THEN
         assert!(matches!(result, TestEventResponse::GetBool(..)));
-    }
-
-    #[tokio::test]
-    async fn GIVEN_player_WHEN_has_player_THEN_ok() {
-        // GIVEN
-        let lobby = Lobby::default();
-        let player_id = "1".to_string();
-        add_player_to_lobby(player_id.clone(), &lobby).await;
-
-        // WHEN
-        let has_player = lobby.has_player(player_id).await.unwrap();
-
-        // THEN
-        assert!(has_player);
-    }
-
-    #[tokio::test]
-    async fn GIVEN_invalid_player_id_WHEN_has_player_THEN_ok() {
-        // GIVEN
-        let lobby = Lobby::default();
-        add_player_to_lobby("1".to_string(), &lobby).await;
-
-        // WHEN
-        let has_player = lobby.has_player("2".to_string()).await.unwrap(); // invalid ID
-
-        // THEN
-        assert_eq!(false, has_player);
-    }
-
-    #[tokio::test]
-    async fn GIVEN_player_in_lobby_WHEN_remove_player_THEN_ok() {
-        // GIVEN
-        let lobby = Lobby::default();
-        let id = "1".to_string();
-        add_player_to_lobby(id.clone(), &lobby).await;
-        let count_before = lobby.player_count().await.unwrap();
-
-        // WHEN
-        let result = lobby.remove_player(id.clone()).await.unwrap();
-
-        // THEN
-        assert!(matches!(
-            result,
-            Some(test_player) if test_player.id() == id // same player was returned
-        ));
-
-        // player count went down bc of the removal
-        let count_after = lobby.player_count().await.unwrap();
-        assert_eq!(count_before - 1, count_after);
-
-        // ensure has_player reflects the removal
-        let has_player = lobby.has_player(id.clone()).await.unwrap();
-        assert_eq!(false, has_player);
-    }
-
-    #[tokio::test]
-    async fn GIVEN_player_not_in_lobby_WHEN_remove_player_THEN_ok() {
-        // GIVEN
-        let lobby = Lobby::default();
-        // add dummy player, bc an empty lobby will always return empty even if logic is wrong
-        add_player_to_lobby("2".to_string(), &lobby).await;
-        let count_before = lobby.player_count().await.unwrap();
-        let unknown_id = "1".to_string();
-        let has_player = lobby.has_player(unknown_id.clone()).await.unwrap();
-        assert_eq!(false, has_player); // unknown ID is not in lobby
-
-        // WHEN
-        let result = lobby.remove_player(unknown_id.clone()).await;
-
-        // THEN
-        assert!(matches!(result, Ok(None))); // operation passed but no player was found/removed
-
-        // player count is unchanged by the removal
-        let count_after = lobby.player_count().await.unwrap();
-        assert_eq!(count_before, count_after);
-
-        // ensure has_player still reflects expected for the unknown ID
-        let has_player = lobby.has_player(unknown_id).await.unwrap();
-        assert_eq!(false, has_player);
     }
 }

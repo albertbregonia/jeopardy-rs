@@ -186,7 +186,7 @@ mod test_manager_tests {
         for _ in 0..u16::MAX {
             // i can't do usize::MAX bc it would take too long
             // these should all pass normally
-            assert!(matches!(manager.is_empty(), Ok(true)));
+            assert!(manager.is_empty().unwrap());
             assert!(matches!(
                 manager.add(
                     "",
@@ -194,16 +194,11 @@ mod test_manager_tests {
                 ),
                 Ok(())
             ));
-            assert!(matches!(manager.has(""), Ok(true)));
-            assert!(matches!(
-                manager.len(),
-                Ok(len) if len == 1
-            ));
-            assert!(matches!(manager.is_empty(), Ok(false)));
-            assert!(matches!(
-                manager.remove(""),
-                Ok(entry) if entry.id() == ""
-            ));
+            assert!(manager.has("").unwrap());
+            assert_eq!(1, manager.len().unwrap());
+            assert_eq!(false, manager.is_empty().unwrap());
+            let entry = manager.remove("").unwrap();
+            assert_eq!("", entry.id());
         }
     }
 
@@ -216,7 +211,7 @@ mod test_manager_tests {
 
         // WHEN
         for _ in 0..n / 6 {
-            assert!(matches!(manager.is_empty(), Ok(true)));
+            assert!(manager.is_empty().unwrap());
             // these should all pass normally
             assert!(matches!(
                 manager.add(
@@ -225,16 +220,11 @@ mod test_manager_tests {
                 ),
                 Ok(())
             ));
-            assert!(manager.has("").is_ok());
-            assert!(matches!(
-                manager.len(),
-                Ok(len) if len == 1
-            ));
-            assert!(matches!(manager.is_empty(), Ok(false)));
-            assert!(matches!(
-                manager.remove(""),
-                Ok(entry) if entry.id() == ""
-            ));
+            assert!(manager.has("").unwrap());
+            assert_eq!(1, manager.len().unwrap());
+            assert_eq!(false, manager.is_empty().unwrap());
+            let entry = manager.remove("").unwrap();
+            assert_eq!("", entry.id());
         }
 
         // THEN
@@ -254,10 +244,8 @@ mod test_manager_tests {
             let n = 100;
             manager.set_fail_after_n(n);
             for _ in 0..n {
-                assert!(matches!(
-                    manager.get(""),
-                    Ok(entry) if entry.id() == ""
-                ));
+                let entry = manager.get("").unwrap();
+                assert_eq!("", entry.id());
             }
             // THEN
             assert!(matches!(manager.get(""), Err(ManagerError::Dependency(..))));

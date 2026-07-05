@@ -60,7 +60,7 @@ mod password_lobby_tests {
     #[tokio::test]
     async fn GIVEN_incorrect_pw_for_pw_lobby_WHEN_check_password_THEN_ok() {
         let lobby = PasswordProtectedLobby::with_test_game("1".to_string(), "12345".to_string());
-        assert_eq!(lobby.is_correct_password("please"), false);
+        assert_eq!(false, lobby.is_correct_password("please")); // incorrect password test
     }
 
     #[tokio::test]
@@ -69,7 +69,7 @@ mod password_lobby_tests {
         // ensure we can get access to the underlying lobby
         // lowk a "test for testing"
         // but we're testing the concrete type matches the trait expectation
-        let lobby = PasswordProtectedLobby::with_test_game("1".to_string(), "".to_string());
-        assert_eq!(lobby.lobby().is_shutdown(), false);
+        let entry = PasswordProtectedLobby::with_test_game("1".to_string(), "".to_string());
+        assert_eq!(false, entry.lobby().is_shutdown());
     }
 }

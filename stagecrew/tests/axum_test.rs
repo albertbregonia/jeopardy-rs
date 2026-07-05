@@ -74,7 +74,7 @@ where
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     // start server
-    let (tx, rx) = mpsc::channel(1);
+    let (tx, rx) = mpsc::channel(1); // create channel to send web server panics back to tests
     let router = Router::new()
         .route("/", get(ws_handler))
         .with_state(Arc::new((tests, tx)));
@@ -88,6 +88,69 @@ where
 
 // NOTE: we are testing the underlying TextTransport implementation for axum WebSocket
 // JSON errors and such will not be tested
+
+#[tokio::test]
+async fn GIVEN_test_type_WHEN_read_json_THEN_ok() {
+    // GIVEN
+    let test_payload = TestType;
+    let fn_test_payload = test_payload.clone(); // move to setup function
+    let (mut ws, mut rx) = setup_websocket_client_and_server(move |mut json_conn| {
+        let test_payload = fn_test_payload.clone(); // each future needs a clone
+        async move {
+            // THEN
+            let payload = json_conn.read_json().await.unwrap().unwrap();
+            assert_eq!(payload, test_payload);
+        }
+    })
+    .await;
+
+    // WHEN
+    let serialized = serde_json::to_string(&test_payload).unwrap();
+    ws.send(Message::text(serialized)).await.unwrap();
+
+    // THEN - panic if the web server panics
+    rx.recv()
+        .await
+        .expect("web server sender closed")
+        .expect("web server panicked");
+}
+
+#[tokio::test]
+async fn GIVEN_close_WHEN_read_json_THEN_ok() {
+    // GIVEN
+    let (mut ws, mut rx) = setup_websocket_client_and_server(|mut json_conn| async move {
+        // THEN
+        // read_json() should receive a close message, close, and return None
+        assert!(json_conn.read_json().await.is_none());
+
+        // all successive reads should return None (according to axum ws docs)
+        assert!(json_conn.read_json().await.is_none());
+    })
+    .await;
+
+    // WHEN - clean disconnect with close message
+    let close_frame = CloseFrame {
+        code: CloseCode::Normal,
+        reason: Utf8Bytes::from_static("test induced"),
+    };
+    ws.close(Some(close_frame.clone())).await.unwrap();
+
+    // THEN - panic if the web server panics
+    rx.recv()
+        .await
+        .expect("web server sender closed")
+        .expect("web server panicked");
+
+    // https://docs.rs/axum/latest/axum/extract/ws/enum.Message.html#variant.Close
+    let close_msg = ws.next().await.unwrap().unwrap();
+    assert!(matches!(
+        close_msg,
+        Message::Close(Some(CloseFrame { code, reason })) // we should get our close frame echoed by axum
+            if code == close_frame.code && reason == close_frame.reason
+    ));
+    // further attempts to read should return None (according to axum docs)
+    assert!(ws.next().await.is_none());
+}
 
 #[tokio::test]
 async fn GIVEN_dropped_client_WHEN_read_json_THEN_error() {
@@ -104,66 +167,11 @@ async fn GIVEN_dropped_client_WHEN_read_json_THEN_error() {
     // WHEN
     drop(ws); // disconnect without close message
 
-    // THEN - result propagated back
-    let result = rx.recv().await.unwrap();
-    result.expect("web server panicked");
-}
-
-#[tokio::test]
-async fn GIVEN_test_type_WHEN_read_json_THEN_ok() {
-    // GIVEN
-    let (mut ws, mut rx) = setup_websocket_client_and_server(|mut json_conn| async move {
-        // THEN
-        let result = json_conn.read_json().await;
-        assert!(matches!(result, Some(Ok(TestType))));
-    })
-    .await;
-
-    // WHEN
-    let serialized = serde_json::to_string(&TestType).unwrap();
-    ws.send(Message::text(serialized)).await.unwrap();
-
-    // THEN - result propagated back
-    let result = rx.recv().await.unwrap();
-    result.expect("web server panicked");
-}
-
-#[tokio::test]
-async fn GIVEN_close_WHEN_read_json_THEN_ok() {
-    // GIVEN
-    let (mut ws, mut rx) = setup_websocket_client_and_server(|mut json_conn| async move {
-        // THEN
-        assert!(matches!(
-            json_conn.read_json().await,
-            None // we should receive a close message, close, and return None
-        ));
-        assert!(matches!(
-            json_conn.read_json().await,
-            None // all successive reads should return None (according to axum ws docs)
-        ));
-    })
-    .await;
-
-    // WHEN - clean disconnect with close message
-    let close_frame = CloseFrame {
-        code: CloseCode::Normal,
-        reason: Utf8Bytes::from_static("test induced"),
-    };
-    ws.close(Some(close_frame)).await.unwrap();
-
-    // THEN - result propagated back
-    let result = rx.recv().await.unwrap();
-    result.expect("web server panicked");
-
-    // https://docs.rs/axum/latest/axum/extract/ws/enum.Message.html#variant.Close
-    assert!(matches!(
-        ws.next().await, // we should get our close frame echoed by axum
-        Some(Ok(Message::Close(Some(CloseFrame { code, .. })))) if code == CloseCode::Normal
-    ));
-    assert!(matches!(
-        ws.next().await, // further attempts to read should return None (according to axum docs)
-        None
-    ));
+    // THEN - panic if the web server panics
+    rx.recv()
+        .await
+        .expect("web server sender closed")
+        .expect("web server panicked");
 }
 
 #[tokio::test]
@@ -181,30 +189,39 @@ async fn GIVEN_ping_msg_WHEN_read_json_THEN_error() {
     // WHEN
     ws.send(Message::Ping("".into())).await.unwrap();
 
-    // THEN - result propagated back
-    let result = rx.recv().await.unwrap();
-    result.expect("web server panicked");
+    // THEN - panic if the web server panics
+    rx.recv()
+        .await
+        .expect("web server sender closed")
+        .expect("web server panicked");
 }
 
 #[tokio::test]
 async fn GIVEN_test_type_WHEN_send_json_THEN_ok() {
     // GIVEN
-    let (mut ws, mut rx) = setup_websocket_client_and_server(|mut json_conn| async move {
-        // THEN
-        assert!(matches!(json_conn.send_json(&TestType).await, Ok(())));
+    let test_payload = TestType;
+    let fn_test_payload = test_payload.clone(); // move to setup function
+    let (mut ws, mut rx) = setup_websocket_client_and_server(move |mut json_conn| {
+        let payload = fn_test_payload.clone(); // each future needs a clone
+        async move {
+            // WHEN
+            json_conn.send_json(&payload).await.unwrap();
+        }
     })
     .await;
 
-    // WHEN
+    // THEN - panic if the web server panics
+    rx.recv()
+        .await
+        .expect("web server sender closed")
+        .expect("web server panicked");
+
+    // ensure payload matches
     let Message::Text(raw_msg) = ws.next().await.unwrap().unwrap() else {
         panic!("Non-text message received during send_json() test");
     };
     let deserialized = serde_json::from_str::<TestType>(&raw_msg).unwrap();
-    assert_eq!(deserialized, TestType);
-
-    // THEN - result propagated back
-    let result = rx.recv().await.unwrap();
-    result.expect("web server panicked");
+    assert_eq!(deserialized, test_payload);
 }
 
 #[tokio::test]
@@ -223,9 +240,11 @@ async fn GIVEN_closed_client_WHEN_send_json_THEN_error() {
     // WHEN
     drop(ws);
 
-    // THEN - result propagated back
-    let result = rx.recv().await.unwrap();
-    result.expect("web server panicked");
+    // THEN - panic if the web server panics
+    rx.recv()
+        .await
+        .expect("web server sender closed")
+        .expect("web server panicked");
 }
 
 #[tokio::test]
@@ -245,16 +264,19 @@ async fn GIVEN_internal_error_reason_WHEN_disconnect_THEN_ok() {
     })
     .await;
 
-    // THEN
+    // THEN - panic if the web server panics
+    rx.recv()
+        .await
+        .expect("web server sender closed")
+        .expect("web server panicked");
+
+    // ensure close msg matches
+    let close_msg = ws.next().await.unwrap().unwrap();
     assert!(matches!(
-        ws.next().await,
-        Some(Ok(Message::Close(Some(CloseFrame { code, reason }))))
+        close_msg,
+        Message::Close(Some(CloseFrame { code, reason }))
             if code == CloseCode::Error && reason == expected_reason
     ));
-
-    // THEN - result propagated back
-    let result = rx.recv().await.unwrap();
-    result.expect("web server panicked");
 }
 
 #[tokio::test]
@@ -262,7 +284,7 @@ async fn GIVEN_user_error_reason_WHEN_disconnect_THEN_ok() {
     // GIVEN
     let expected_reason = "test";
     let reason = ErrorReason {
-        internal_error: false,
+        internal_error: false, // user error
         reason: expected_reason.to_string(),
     };
     let (mut ws, mut rx) = setup_websocket_client_and_server(move |json_conn| {
@@ -274,16 +296,19 @@ async fn GIVEN_user_error_reason_WHEN_disconnect_THEN_ok() {
     })
     .await;
 
-    // THEN
+    // THEN - panic if the web server panics
+    rx.recv()
+        .await
+        .expect("web server sender closed")
+        .expect("web server panicked");
+
+    // ensure close msg matches
+    let close_msg = ws.next().await.unwrap().unwrap();
     assert!(matches!(
-        ws.next().await,
-        Some(Ok(Message::Close(Some(CloseFrame { code, reason }))))
+        close_msg,
+        Message::Close(Some(CloseFrame { code, reason }))
             if code == CloseCode::Invalid && reason == expected_reason
     ));
-
-    // THEN - result propagated back
-    let result = rx.recv().await.unwrap();
-    result.expect("web server panicked");
 }
 
 #[tokio::test]
@@ -295,13 +320,15 @@ async fn GIVEN_no_reason_WHEN_disconnect_THEN_ok() {
     })
     .await;
 
-    // THEN
-    assert!(matches!(
-        ws.next().await, // default axum.close() msg
-        Some(Ok(Message::Close(None)))
-    ));
+    // THEN - panic if the web server panics
+    rx.recv()
+        .await
+        .expect("web server sender closed")
+        .expect("web server panicked");
 
-    // THEN - result propagated back
-    let result = rx.recv().await.unwrap();
-    result.expect("web server panicked");
+    let close_msg = ws.next().await.unwrap().unwrap();
+    assert!(matches!(
+        close_msg,
+        Message::Close(..) // ensure we simply get a close msg, default axum functionality
+    ));
 }

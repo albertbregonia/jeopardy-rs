@@ -12,7 +12,7 @@ pub enum JeopardyDisplayEvent {
 }
 
 /// Enum of commands any player or the host of the Jeopardy game can send.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PlayerCommand {
     Buzz,
     Refresh,
