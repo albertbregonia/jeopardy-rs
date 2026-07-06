@@ -73,7 +73,7 @@ mod map_manager_tests {
         let id = "1";
         let entry = PasswordProtectedLobby::with_test_game(id.to_string(), "password".to_string());
 
-        // initial state
+        // preconditions
         let len_before = manager.len().unwrap();
         let has_entry = manager.has(id).unwrap();
         assert_eq!(false, has_entry); // does not exist before add
@@ -98,7 +98,7 @@ mod map_manager_tests {
         let entry = PasswordProtectedLobby::with_test_game(id.to_string(), password.to_string());
         manager.add(id, entry).unwrap();
 
-        // initial state
+        // preconditions
         let len_before = manager.len().unwrap();
         let has_entry = manager.has(id).unwrap();
         assert!(has_entry);
@@ -132,7 +132,7 @@ mod map_manager_tests {
         let entry = PasswordProtectedLobby::with_test_game(id.to_string(), "password".to_string());
         manager.add(id, entry).unwrap();
 
-        // initial state
+        // preconditions
         let len_before = manager.len().unwrap();
         let has_entry = manager.has(id).unwrap();
         assert!(has_entry);
@@ -160,7 +160,7 @@ mod map_manager_tests {
         manager.add(valid_id, entry).unwrap(); // add dummy player just to ensure !empty
         let invalid_id = "2";
 
-        // initial state
+        // preconditions
         let len_before = manager.len().unwrap();
         let has_entry = manager.has(invalid_id).unwrap();
         assert_eq!(false, has_entry);
@@ -189,7 +189,7 @@ mod map_manager_tests {
         let entry = PasswordProtectedLobby::with_test_game(id.to_string(), "password".to_string());
         manager.add(id, entry).unwrap();
 
-        // initial state
+        // preconditions
         let has_entry = manager.has(id).unwrap();
         assert!(has_entry);
 
@@ -210,7 +210,7 @@ mod map_manager_tests {
             PasswordProtectedLobby::with_test_game(valid_id.to_string(), "password".to_string());
         manager.add(valid_id, entry).unwrap();
 
-        // initial state
+        // preconditions
         let has_entry = manager.has(invalid_id).unwrap();
         assert_eq!(false, has_entry);
 

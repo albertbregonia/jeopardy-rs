@@ -327,7 +327,7 @@ mod lobby_tests {
     // moved to a helper because some operations require a player
     /// Adds a player and performs validation given a lobby
     async fn add_player_to_lobby(player_id: &str, lobby: &Lobby<TestGame>) {
-        // GIVEN - initial state
+        // GIVEN - preconditions
         let count_before = lobby.player_count().await.unwrap();
         let has_player = lobby.has_player(player_id).await.unwrap();
         assert_eq!(false, has_player);
@@ -361,7 +361,7 @@ mod lobby_tests {
         // GIVEN
         let lobby = Lobby::default();
         let player_id = "1";
-        add_player_to_lobby(player_id, &lobby).await; // ensures expected init state 
+        add_player_to_lobby(player_id, &lobby).await; // ensures expected preconditions 
         let count_before = lobby.player_count().await.unwrap();
 
         // WHEN
@@ -389,7 +389,7 @@ mod lobby_tests {
         // GIVEN
         let lobby = Lobby::default();
         let player_id = "1";
-        add_player_to_lobby(player_id, &lobby).await; // ensures expected init state
+        add_player_to_lobby(player_id, &lobby).await; // ensures expected preconditions
         let count_before = lobby.player_count().await.unwrap();
 
         // WHEN
@@ -410,10 +410,10 @@ mod lobby_tests {
         // GIVEN
         let lobby = Lobby::default();
         // add dummy player, bc an empty lobby will always return empty even if logic is wrong
-        add_player_to_lobby("1", &lobby).await; // ensures expected init state
+        add_player_to_lobby("1", &lobby).await; // ensures expected preconditions
         let invalid_id = "2";
 
-        // init state
+        // preconditions
         let count_before = lobby.player_count().await.unwrap();
         let has_player = lobby.has_player(invalid_id).await.unwrap();
         assert_eq!(false, has_player);
