@@ -104,6 +104,7 @@ pub mod json_conn_test_constructs {
     use tokio::sync::mpsc::{self, Receiver, Sender};
 
     pub struct MockTextTransport<I: Serialize> {
+        pub fail_during_read_text: bool, // bool to manually induce a failure during read_text()
         pub input_receiver: Receiver<I>,
         pub output_sender: Sender<String>,
     }
@@ -122,11 +123,11 @@ pub mod json_conn_test_constructs {
         /// JSON serializes the message and returns the bytes
         /// to be read by `JsonConn` and deserialized
         async fn read_text(&mut self) -> Option<Result<Bytes, Self::Error>> {
+            if self.fail_during_read_text {
+                return Some(Err(MockError::Generic));
+            }
             let msg = self.input_receiver.recv().await?;
-            let serialized = match serde_json::to_vec(&msg) {
-                Ok(bin) => bin,
-                Err(e) => return Some(Err(MockError::Derivative(e.into()))),
-            };
+            let serialized = serde_json::to_vec(&msg).unwrap();
             Some(Ok(Bytes::from(serialized)))
         }
 
@@ -154,7 +155,9 @@ pub mod json_conn_test_constructs {
     /// The output is serialized by `JsonConn::send_json()` then sent over the `mpsc::channel` using `TextTransport::send_text()`.
     /// The receiving end is still text to readily compare received output with expected serialized output
     /// (some types we may only expect serialization but not deserialization)
-    pub fn new_mock_json_conn<I: Serialize + DeserializeOwned, O: Serialize>() -> (
+    pub fn new_mock_json_conn<I: Serialize + DeserializeOwned, O: Serialize>(
+        fail_during_read_text: bool,
+    ) -> (
         JsonConn<MockTextTransport<I>, I, O>,
         mpsc::Sender<I>,
         mpsc::Receiver<String>,
@@ -162,6 +165,7 @@ pub mod json_conn_test_constructs {
         let (input_sender, input_receiver) = mpsc::channel(1);
         let (output_sender, output_receiver) = mpsc::channel(1);
         let mock_conn = JsonConn::new(MockTextTransport {
+            fail_during_read_text,
             input_receiver,
             output_sender,
         });
@@ -175,32 +179,12 @@ mod json_conn_tests {
     use crate::conn::json_conn_test_constructs::new_mock_json_conn;
 
     use super::*;
-    use serde::ser::Error;
     use serde::{Deserialize, Deserializer};
 
-    #[derive(Debug, PartialEq, Clone)]
+    #[derive(Debug, PartialEq, Clone, Serialize)]
     enum TestType {
         VariantA,
-        VariantB(bool),
-    }
-
-    impl Serialize for TestType {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            match self {
-                TestType::VariantA => serializer.serialize_unit_variant("TestType", 0, "VariantA"),
-                TestType::VariantB(should_fail) => {
-                    if *should_fail {
-                        // `should_fail` gives us a hook to make serialization fail
-                        Err(S::Error::custom("VariantB cannot be serialized"))
-                    } else {
-                        serializer.serialize_bool(*should_fail)
-                    }
-                }
-            }
-        }
+        VariantB, // serializes but does not deserialize
     }
 
     impl<'de> Deserialize<'de> for TestType {
@@ -226,7 +210,7 @@ mod json_conn_tests {
     #[tokio::test]
     async fn GIVEN_input_WHEN_read_json_THEN_ok() {
         // GIVEN
-        let (mut mock_conn, input_sender, _) = new_mock_json_conn::<TestType, TestType>();
+        let (mut mock_conn, input_sender, _) = new_mock_json_conn::<TestType, TestType>(false);
         let request = TestType::VariantA; // will be serialized by `MockTextTransport` to then be deserialized by `JsonConn`
         input_sender.send(request.clone()).await.unwrap();
 
@@ -240,7 +224,7 @@ mod json_conn_tests {
     #[tokio::test]
     async fn GIVEN_closed_client_conn_WHEN_read_json_THEN_ok() {
         // GIVEN
-        let (mut mock_conn, input_sender, _) = new_mock_json_conn::<TestType, TestType>();
+        let (mut mock_conn, input_sender, _) = new_mock_json_conn::<TestType, TestType>(false);
         drop(input_sender); // TextTransport::read_text() returns `None`: clean disconnect
 
         // WHEN
@@ -252,10 +236,9 @@ mod json_conn_tests {
 
     #[tokio::test]
     async fn GIVEN_read_text_error_WHEN_read_json_THEN_error() {
-        // GIVEN
-        let (mut mock_conn, input_sender, _) = new_mock_json_conn::<TestType, TestType>();
-        // this doesn't serialize in `MockTextTransport` so it errors in read_text() and gets propagated upward
-        input_sender.send(TestType::VariantB(true)).await.unwrap();
+        // GIVEN - `fail_during_read_text` is set to true so when read_text() is called, it will fail and propagate upward to read_json()
+        let (mut mock_conn, input_sender, _) = new_mock_json_conn::<TestType, TestType>(true);
+        input_sender.send(TestType::VariantA).await.unwrap();
 
         // WHEN
         let result = mock_conn.read_json().await.unwrap();
@@ -267,9 +250,9 @@ mod json_conn_tests {
     #[tokio::test]
     async fn GIVEN_deserialize_error_WHEN_read_json_THEN_error() {
         // GIVEN
-        let (mut mock_conn, input_sender, _) = new_mock_json_conn::<TestType, TestType>();
+        let (mut mock_conn, input_sender, _) = new_mock_json_conn::<TestType, TestType>(false);
         // this should serialize but not deserialize so it fails in read_json()
-        input_sender.send(TestType::VariantB(false)).await.unwrap();
+        input_sender.send(TestType::VariantB).await.unwrap();
 
         // WHEN
         let result = mock_conn.read_json().await.unwrap();
@@ -283,7 +266,8 @@ mod json_conn_tests {
     #[tokio::test]
     async fn GIVEN_payload_WHEN_send_json_THEN_ok() {
         // GIVEN
-        let (mut mock_conn, _, mut output_receiver) = new_mock_json_conn::<TestType, TestType>();
+        let (mut mock_conn, _, mut output_receiver) =
+            new_mock_json_conn::<TestType, TestType>(false);
         let payload = TestType::VariantA;
 
         // WHEN
@@ -298,7 +282,7 @@ mod json_conn_tests {
     #[tokio::test]
     async fn GIVEN_closed_client_conn_WHEN_send_json_THEN_error() {
         // GIVEN
-        let (mut mock_conn, _, output_receiver) = new_mock_json_conn::<TestType, TestType>();
+        let (mut mock_conn, _, output_receiver) = new_mock_json_conn::<TestType, TestType>(false);
         drop(output_receiver);
 
         // WHEN
@@ -313,7 +297,7 @@ mod json_conn_tests {
     #[tokio::test]
     async fn GIVEN_mock_conn_WHEN_disconnect_THEN_ok() {
         // GIVEN
-        let (mock_conn, _, _output_receiver) = new_mock_json_conn::<TestType, TestType>();
+        let (mock_conn, _, _output_receiver) = new_mock_json_conn::<TestType, TestType>(false);
 
         // WHEN
         // Option<ErrorReason> isn't important here bc it's merely passed
@@ -327,7 +311,7 @@ mod json_conn_tests {
     #[tokio::test]
     async fn GIVEN_disconnected_mock_conn_WHEN_disconnect_THEN_error() {
         // GIVEN
-        let (mock_conn, _, _) = new_mock_json_conn::<TestType, TestType>(); // drop sender so disconnect() fails
+        let (mock_conn, _, _) = new_mock_json_conn::<TestType, TestType>(false); // drop sender so disconnect() fails
 
         // WHEN
         let result = mock_conn.disconnect(None).await;

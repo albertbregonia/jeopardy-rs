@@ -179,7 +179,7 @@ where
             .await
             .map_err(|_| UserError::RequestTimeout)?
             .ok_or(UserError::UnexpectedDisconnect)?
-            .map_err(|e| InternalError::Dependency(anyhow!("Failed to read request: {e}")))?; // with our MockConn we cannot unit test this case
+            .map_err(|e| InternalError::Dependency(anyhow!("Failed to read request: {e}")))?;
         Ok(request)
     }
 }
@@ -212,12 +212,14 @@ mod player_conn_tests {
     // cannot use TestDefault bc async and we need to return the mpsc handles
     async fn new_test_player_conn<M: ManagerGeneric, C: CredsValidatorGeneric>(
         state: GenericJeopardyServerState<M, C>,
+        fail_during_read_text: bool,
     ) -> (
         PlayerConn<MockTextTransport<PlayerRequest>, M, C>,
         mpsc::Sender<PlayerRequest>,
         mpsc::Receiver<String>,
     ) {
-        let (mock_json_conn, input_sender, output_receiver) = new_mock_json_conn();
+        let (mock_json_conn, input_sender, output_receiver) =
+            new_mock_json_conn(fail_during_read_text);
         let player_conn = PlayerConn::new(state, mock_json_conn);
         (player_conn, input_sender, output_receiver)
     }
@@ -238,7 +240,7 @@ mod player_conn_tests {
     async fn GIVEN_player_conn_WHEN_send_response_THEN_ok() {
         // GIVEN
         let state = default_server_state_with_lobby().await;
-        let (mut player_conn, _, mut output_receiver) = new_test_player_conn(state).await;
+        let (mut player_conn, _, mut output_receiver) = new_test_player_conn(state, false).await;
         let response = PlayerCommandResponse::Success;
 
         // WHEN
@@ -258,7 +260,7 @@ mod player_conn_tests {
         // GIVEN
         let state = default_server_state_with_lobby().await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
-        let (mut player_conn, _, _) = new_test_player_conn(state).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state, false).await;
 
         // WHEN
         let result = player_conn
@@ -275,7 +277,7 @@ mod player_conn_tests {
     async fn GIVEN_player_conn_WHEN_send_recoverable_user_error_THEN_ok() {
         // GIVEN
         let state = default_server_state_with_lobby().await;
-        let (mut player_conn, _, mut output_receiver) = new_test_player_conn(state).await;
+        let (mut player_conn, _, mut output_receiver) = new_test_player_conn(state, false).await;
         let user_error = UserError::Login(LoginError::IncorrectLobbyPassword); // realistic error - we don't want to kill their connection for a typo
         let error_msg = user_error.to_string();
 
@@ -299,7 +301,7 @@ mod player_conn_tests {
         // GIVEN
         let state = default_server_state_with_lobby().await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
-        let (mut player_conn, _, _) = new_test_player_conn(state).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state, false).await;
         let user_error = UserError::Login(LoginError::IncorrectLobbyPassword);
 
         // WHEN
@@ -315,7 +317,7 @@ mod player_conn_tests {
     async fn GIVEN_player_conn_WHEN_send_irrecoverable_user_error_THEN_ok() {
         // GIVEN
         let state = default_server_state_with_lobby().await;
-        let (player_conn, _, _output_receiver) = new_test_player_conn(state).await;
+        let (player_conn, _, _output_receiver) = new_test_player_conn(state, false).await;
         let user_error = UserError::RequestTimeout; // realistic error - if soft lock, we want to kill the connection
 
         // WHEN
@@ -332,7 +334,7 @@ mod player_conn_tests {
         // GIVEN
         let state = default_server_state_with_lobby().await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
-        let (player_conn, _, _) = new_test_player_conn(state).await;
+        let (player_conn, _, _) = new_test_player_conn(state, false).await;
         let user_error = UserError::RequestTimeout; // realistic error - if soft lock, we want to kill the connection
 
         // WHEN
@@ -350,7 +352,7 @@ mod player_conn_tests {
     async fn GIVEN_player_conn_WHEN_handle_internal_error_THEN_ok() {
         // GIVEN
         let state = default_server_state_with_lobby().await;
-        let (player_conn, _, _output_receiver) = new_test_player_conn(state).await;
+        let (player_conn, _, _output_receiver) = new_test_player_conn(state, false).await;
         let internal_error = InternalError::MissingLoginCredentials;
 
         // WHEN
@@ -365,7 +367,7 @@ mod player_conn_tests {
         // GIVEN
         let state = default_server_state_with_lobby().await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
-        let (player_conn, _, _) = new_test_player_conn(state).await;
+        let (player_conn, _, _) = new_test_player_conn(state, false).await;
         let internal_error = InternalError::MissingLoginCredentials;
 
         // WHEN
@@ -385,7 +387,7 @@ mod player_conn_tests {
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server(Some(create_lobby_request.clone())).await;
-        let (mut player_conn, input_sender, _) = new_test_player_conn(state).await;
+        let (mut player_conn, input_sender, _) = new_test_player_conn(state, false).await;
         let login_request = LoginCredentials {
             // derive login request from create lobby request
             lobby_id: create_lobby_request.lobby_name,
@@ -422,7 +424,7 @@ mod player_conn_tests {
         // GIVEN
         let state = default_server_state_with_lobby().await;
         // we don't drop the input sender so that we have a valid connection but player_conn times out bc we don't send anything
-        let (mut player_conn, _input_sender, _) = new_test_player_conn(state).await;
+        let (mut player_conn, _input_sender, _) = new_test_player_conn(state, false).await;
 
         // WHEN
         let result = player_conn
@@ -441,7 +443,7 @@ mod player_conn_tests {
         // GIVEN
         let state = default_server_state_with_lobby().await;
         // drop both input sender and output receiver so that the underlying read_json() errors
-        let (mut player_conn, _, _) = new_test_player_conn(state).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state, false).await;
 
         // WHEN
         let result = player_conn
@@ -452,6 +454,25 @@ mod player_conn_tests {
         assert!(matches!(
             result,
             Err(PlayerHandlerError::User(UserError::UnexpectedDisconnect))
+        ));
+    }
+
+    #[tokio::test]
+    async fn GIVEN_json_conn_error_WHEN_read_request_with_timeout_THEN_error() {
+        // GIVEN
+        let state = default_server_state_with_lobby().await;
+        // set `fail_during_read_text` to true to cascade the error (TextTransport errors => JsonConn errors => PlayerConn errors)
+        let (mut player_conn, _, _) = new_test_player_conn(state, true).await;
+
+        // WHEN
+        let result = player_conn
+            .read_request_with_timeout(Duration::from_secs(1))
+            .await;
+
+        // THEN
+        assert!(matches!(
+            result,
+            Err(PlayerHandlerError::Internal(InternalError::Dependency(..)))
         ));
     }
 }
