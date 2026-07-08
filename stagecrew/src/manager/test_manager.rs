@@ -48,6 +48,7 @@ pub mod test_manager_constructs {
             config.valid_operation_count >= config.fail_after_n
         }
         pub fn set_fail_after_n(&mut self, n: usize) {
+            self.reset();
             self.failure_config.lock().unwrap().fail_after_n = n;
         }
         pub fn set_always_fail(&mut self) {

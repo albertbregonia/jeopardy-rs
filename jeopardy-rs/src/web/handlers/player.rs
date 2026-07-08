@@ -19,8 +19,8 @@ use crate::{
         commands::player::{PlayerCommand, PlayerCommandResponse},
         player::{JeopardyPlayer, JeopardyPlayerEvent},
     },
-    server::{CredsValidatorGeneric, GenericJeopardyServerState, ManagerGeneric},
-    web::handlers::serialize_result,
+    server::{CredsValidatorGeneric, JeopardyServerStateGeneric, ManagerGeneric},
+    web::handlers::{delete_lobby::shutdown_lobby_and_delete_no_auth, serialize_result},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,7 +51,7 @@ pub struct PlayerResponse {
 // - all internal server errors / irrecoverable user errors are returned from the function.
 //   meaning, a function does not return an error unless it believes it cannot/should not continue
 pub struct PlayerConn<T: TextTransport, M: ManagerGeneric, C: CredsValidatorGeneric> {
-    state: GenericJeopardyServerState<M, C>,
+    state: JeopardyServerStateGeneric<M, C>,
     json_ws: JsonConn<T, PlayerRequest, PlayerResponse>,
     creds: Option<LoginCredentials>,
 }
@@ -93,6 +93,8 @@ pub enum UserError {
 
 #[derive(Debug, Error)]
 pub enum InternalError {
+    #[error("Inactive lobby ID: {0} still present in manager")]
+    InactiveLobby(String),
     #[error("Attempted to perform an operation that requires the player to be logged in.")]
     MissingLoginCredentials,
     #[error("Unexpected response type: {0}")]
@@ -122,7 +124,7 @@ where
     C: CredsValidatorGeneric,
 {
     pub fn new(
-        state: GenericJeopardyServerState<M, C>,
+        state: JeopardyServerStateGeneric<M, C>,
         json_ws: JsonConn<T, PlayerRequest, PlayerResponse>,
     ) -> Self {
         Self {
@@ -247,9 +249,16 @@ where
                     tracing::warn!("Username conflict for player");
                     PlayerHandlerError::User(UserError::Login(LoginError::UsernameAlreadyTaken))
                 }
+                LobbyError::ActorShutdown => {
+                    // we should maintain the invariant that a lobby in the manager is always an active one
+                    // however, the compiler cannot guarantee that. therefore we still handle it
+                    tracing::error!("Attempted to join a lobby that was shutdown");
+                    PlayerHandlerError::Internal(InternalError::InactiveLobby(lobby_id.clone()))
+                }
                 other => {
+                    // cant test this but that's the point
                     tracing::error!("Unexpected error during add player to lobby: {other}");
-                    PlayerHandlerError::Internal(InternalError::Dependency(other.into()))
+                    PlayerHandlerError::Internal(InternalError::UnexpectedResponse(other.into()))
                 }
             })?;
 
@@ -257,41 +266,115 @@ where
         self.creds = Some(creds);
         Ok(receiver)
     }
+
+    /// attempts to remove a player from their lobby using their saved login creds (self.creds)
+    /// the following are not considered failures, but moreso no-ops
+    /// - if the lobby is already deleted, this simply returns Ok(None)
+    /// - if the player was not part of the lobby (somehow) or the lobby exists but was shutdown returns Ok(None)
+    ///
+    /// possible failures:
+    /// - InternalError::UserNotLoggedIn, attempted to leave a lobby without a previous `join_lobby(..)` call (self.creds == None)
+    /// - any LobbyError other than ActorShutdown after calling remove_player()
+    pub async fn leave_lobby(&mut self) -> Result<JeopardyPlayer, InternalError> {
+        let LoginCredentials {
+            lobby_id, username, ..
+        } = self
+            .creds
+            .take()
+            .ok_or(InternalError::MissingLoginCredentials)?;
+        let leave_span =
+            tracing::info_span!("leave_lobby", lobby_id = lobby_id, username = username);
+        let _enter = leave_span.enter();
+
+        // get lobby
+        let manager_wg = self.state.manager().write().await;
+        let entry = manager_wg
+            .get(&lobby_id)
+            .map_err(|e| InternalError::Dependency(e.into()))?;
+        tracing::info!("Successfully found requested lobby");
+
+        // remove player from lobby
+        let player = entry
+            .lobby()
+            .remove_player(&username)
+            .await
+            .map_err(|e| match e {
+                LobbyError::ActorShutdown => {
+                    tracing::error!(
+                        "Failed to remove player from lobby. Lobby is already shut down"
+                    );
+                    InternalError::InactiveLobby(lobby_id.clone())
+                }
+                other => {
+                    tracing::error!("Unexpected error during remove player: {other}");
+                    InternalError::UnexpectedResponse(other.into())
+                }
+            })?;
+        tracing::info!("Successfully removed player from lobby");
+
+        // handle empty lobby
+        let player_count = entry.lobby().player_count().await.map_err(|e| match e {
+            LobbyError::ActorShutdown => {
+                // can't test this but positive case tested
+                tracing::error!("Failed to check player count. Lobby is already shut down");
+                InternalError::InactiveLobby(lobby_id.clone())
+            }
+            other => {
+                // can't test this but that's the point
+                tracing::error!("Unexpected error during player count check");
+                InternalError::UnexpectedResponse(other.into())
+            }
+        })?;
+        tracing::info!("Current player count: {player_count}");
+        if player_count == 0 {
+            shutdown_lobby_and_delete_no_auth(manager_wg, &lobby_id) // logs its operation
+                .await
+                .map_err(|e| InternalError::Dependency(e.into()))?;
+            tracing::info!("Successfully deleted empty lobby");
+        }
+        Ok(player)
+    }
 }
 
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod player_conn_tests {
-
-    use std::time::Duration;
-
     use stagecrew::{
         conn::json_conn_test_constructs::{MockTextTransport, new_mock_json_conn},
-        manager::{Manager, ManagerEntry},
+        manager::{
+            Manager, MapManager, PasswordProtectedLobby, test_manager_constructs::TestManager,
+        },
+        player::Player,
     };
+    use std::time::Duration;
     use tokio::sync::mpsc;
 
     use crate::{
-        game::{commands::player::PlayerCommandResponse, jeopardy::config::JeopardyConfig},
-        server::{CredsValidatorGeneric, GenericJeopardyServerState, ManagerGeneric, TestDefault},
+        game::{
+            Jeopardy, commands::player::PlayerCommandResponse, jeopardy::config::JeopardyConfig,
+        },
+        server::{
+            CredsValidatorGeneric, JeopardyServerState, JeopardyServerStateGeneric, ManagerGeneric,
+            TestDefault,
+        },
         web::handlers::{
-            create_lobby::{
-                CreateLobbyRequest,
-                create_lobby_test_util::{
-                    new_test_server, new_test_server_with_player, new_test_server_with_test_manager,
-                },
-            },
+            create_lobby::CreateLobbyRequest,
             player::{
                 InternalError, LoginCredentials, LoginError, PlayerConn, PlayerHandlerError,
                 PlayerRequest, PlayerResponse, UserError,
             },
+            test_util::{
+                TestManagerServerState, lobby_has_player, new_test_manager_server_state,
+                new_test_server_state, new_test_server_state_with_player, shutdown_lobby,
+            },
+            validators::nonzero_ascii::NonZeroAsciiValidator,
         },
     };
 
     // helper to create a player conn that uses an mpsc to simulate a websocket
     // cannot use TestDefault bc async and we need to return the mpsc handles
     async fn new_test_player_conn<M: ManagerGeneric, C: CredsValidatorGeneric>(
-        state: GenericJeopardyServerState<M, C>,
+        state: JeopardyServerStateGeneric<M, C>,
         fail_during_read_text: bool,
     ) -> (
         PlayerConn<MockTextTransport<PlayerRequest>, M, C>,
@@ -304,30 +387,12 @@ mod player_conn_tests {
         (player_conn, input_sender, output_receiver)
     }
 
-    // helper function to check if a lobby has a player given the respective IDs
-    // (mostly made bc writing out this call everywhere is long)
-    async fn lobby_has_player<M: ManagerGeneric, C: CredsValidatorGeneric>(
-        state: &GenericJeopardyServerState<M, C>,
-        lobby_id: &str,
-        player_id: &str,
-    ) -> bool {
-        state
-            .manager()
-            .read()
-            .await
-            .get(lobby_id)
-            .unwrap()
-            .lobby()
-            .has_player(player_id)
-            .await
-            .unwrap()
-    }
     // send_response() tests
 
     #[tokio::test]
     async fn GIVEN_player_conn_WHEN_send_response_THEN_ok() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         let (mut player_conn, _, mut output_receiver) = new_test_player_conn(state, false).await;
         let response = PlayerCommandResponse::Success;
 
@@ -342,11 +407,10 @@ mod player_conn_tests {
         .unwrap();
         assert_eq!(raw_msg, expected);
     }
-
     #[tokio::test]
     async fn GIVEN_disconnected_player_conn_WHEN_send_response_THEN_error() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
         let (mut player_conn, _, _) = new_test_player_conn(state, false).await;
 
@@ -364,7 +428,7 @@ mod player_conn_tests {
     #[tokio::test]
     async fn GIVEN_player_conn_WHEN_send_recoverable_user_error_THEN_ok() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         let (mut player_conn, _, mut output_receiver) = new_test_player_conn(state, false).await;
         let user_error = UserError::Login(LoginError::IncorrectLobbyPassword); // realistic error - we don't want to kill their connection for a typo
         let error_msg = user_error.to_string();
@@ -387,7 +451,7 @@ mod player_conn_tests {
     #[tokio::test]
     async fn GIVEN_disconnected_player_conn_WHEN_send_recoverable_user_error_THEN_error() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
         let (mut player_conn, _, _) = new_test_player_conn(state, false).await;
         let user_error = UserError::Login(LoginError::IncorrectLobbyPassword);
@@ -404,7 +468,7 @@ mod player_conn_tests {
     #[tokio::test]
     async fn GIVEN_player_conn_WHEN_send_irrecoverable_user_error_THEN_ok() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         let (player_conn, _, _output_receiver) = new_test_player_conn(state, false).await;
         let user_error = UserError::RequestTimeout; // realistic error - if soft lock, we want to kill the connection
 
@@ -420,7 +484,7 @@ mod player_conn_tests {
     #[tokio::test]
     async fn GIVEN_disconnected_player_conn_WHEN_send_irrecoverable_user_error_THEN_error() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
         let (player_conn, _, _) = new_test_player_conn(state, false).await;
         let user_error = UserError::RequestTimeout; // realistic error - if soft lock, we want to kill the connection
@@ -439,7 +503,7 @@ mod player_conn_tests {
     #[tokio::test]
     async fn GIVEN_player_conn_WHEN_handle_internal_error_THEN_ok() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         let (player_conn, _, _output_receiver) = new_test_player_conn(state, false).await;
         let internal_error = InternalError::MissingLoginCredentials;
 
@@ -453,7 +517,7 @@ mod player_conn_tests {
     #[tokio::test]
     async fn GIVEN_disconnected_player_conn_WHEN_handle_internal_error_THEN_error() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
         let (player_conn, _, _) = new_test_player_conn(state, false).await;
         let internal_error = InternalError::MissingLoginCredentials;
@@ -476,7 +540,7 @@ mod player_conn_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
         let (mut player_conn, input_sender, _) = new_test_player_conn(state, false).await;
         let login_request = LoginCredentials {
             // derive login request from create lobby request
@@ -512,7 +576,7 @@ mod player_conn_tests {
     #[tokio::test]
     async fn GIVEN_timeout_player_conn_WHEN_read_request_with_timeout_THEN_error() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         // we don't drop the input sender so that we have a valid connection but player_conn times out bc we don't send anything
         let (mut player_conn, _input_sender, _) = new_test_player_conn(state, false).await;
 
@@ -531,7 +595,7 @@ mod player_conn_tests {
     #[tokio::test]
     async fn GIVEN_disconnected_player_conn_WHEN_read_request_with_timeout_THEN_error() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         // drop both input sender and output receiver so that the underlying read_json() errors
         let (mut player_conn, _, _) = new_test_player_conn(state, false).await;
 
@@ -550,7 +614,7 @@ mod player_conn_tests {
     #[tokio::test]
     async fn GIVEN_json_conn_error_WHEN_read_request_with_timeout_THEN_error() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         // set `fail_during_read_text` to true to cascade the error (TextTransport errors => JsonConn errors => PlayerConn errors)
         let (mut player_conn, _, _) = new_test_player_conn(state, true).await;
 
@@ -566,21 +630,20 @@ mod player_conn_tests {
         ));
     }
 
-    // join_lobby() tests
-
-    #[tokio::test]
-    async fn GIVEN_valid_creds_WHEN_join_lobby_THEN_ok() {
+    // helper built out of GIVEN_valid_creds_WHEN_join_lobby_THEN_ok
+    // primary use case is to be setup for the leave_lobby() tests
+    async fn new_logged_in_player_conn<M, C>(
+        state: &JeopardyServerStateGeneric<M, C>,
+        create_lobby_request: CreateLobbyRequest,
+        username: &str,
+    ) -> PlayerConn<MockTextTransport<PlayerRequest>, M, C>
+    where
+        M: ManagerGeneric,
+        C: CredsValidatorGeneric,
+    {
         // GIVEN
-        let lobby_name = "lobby_name";
-        let create_lobby_request = CreateLobbyRequest {
-            lobby_name: lobby_name.to_string(),
-            lobby_password: "lobby_password".to_string(),
-            host_password: "host_password".to_string(),
-            config: JeopardyConfig::test_default(),
-        };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let lobby_name = create_lobby_request.lobby_name.clone();
         let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false).await;
-        let username = "username";
         let login_request = LoginCredentials {
             // derive login request from create lobby request
             lobby_id: create_lobby_request.lobby_name,
@@ -592,18 +655,73 @@ mod player_conn_tests {
         let _receiver = player_conn.join_lobby(login_request.clone()).await.unwrap();
 
         // THEN
-        assert!(lobby_has_player(&state, lobby_name, username).await);
+        assert!(lobby_has_player(&state, &lobby_name, username).await);
         // cached creds match
-        let player_creds = player_conn.creds.unwrap();
+        let player_creds = player_conn.creds.clone().unwrap();
         assert_eq!(player_creds.lobby_id, login_request.lobby_id);
         assert_eq!(player_creds.lobby_password, login_request.lobby_password);
         assert_eq!(player_creds.username, login_request.username);
+        player_conn
+    }
+
+    // really terrible but it is only needed for the following return signatures
+    type TestPlayerConn = PlayerConn<
+        MockTextTransport<PlayerRequest>,
+        MapManager<PasswordProtectedLobby<Jeopardy>>,
+        NonZeroAsciiValidator,
+    >;
+    type TestManagerPlayerConn = PlayerConn<
+        MockTextTransport<PlayerRequest>,
+        TestManager<PasswordProtectedLobby<Jeopardy>>,
+        NonZeroAsciiValidator,
+    >;
+
+    async fn new_test_server_state_with_logged_in_players(
+        usernames: Vec<String>,
+        lobby_name: &str,
+    ) -> (JeopardyServerState, Vec<TestPlayerConn>) {
+        let request = CreateLobbyRequest {
+            lobby_name: lobby_name.to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
+            config: JeopardyConfig::test_default(),
+        };
+        let state = new_test_server_state(Some(request.clone())).await;
+        let mut player_conns = vec![];
+        for username in usernames {
+            let player_conn = new_logged_in_player_conn(&state, request.clone(), &username).await;
+            player_conns.push(player_conn);
+        }
+        (state, player_conns)
+    }
+
+    async fn new_test_manager_server_state_with_logged_in_player(
+        username: &str,
+        lobby_name: &str,
+    ) -> (TestManagerServerState, TestManagerPlayerConn) {
+        let request = CreateLobbyRequest {
+            lobby_name: lobby_name.to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
+            config: JeopardyConfig::test_default(),
+        };
+        let state = new_test_manager_server_state(Some(request.clone())).await;
+        let player_conn = new_logged_in_player_conn(&state, request, username).await;
+        (state, player_conn)
+    }
+
+    // join_lobby() tests
+
+    #[tokio::test]
+    async fn GIVEN_valid_creds_WHEN_join_lobby_THEN_ok() {
+        new_test_server_state_with_logged_in_players(vec!["username".to_string()], "lobby_name")
+            .await;
     }
 
     #[tokio::test]
     async fn GIVEN_invalid_lobby_WHEN_join_lobby_THEN_error() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false).await;
         let invalid_lobby_name = "INVALID"; // no lobbies exist so this is invalid
 
@@ -637,7 +755,7 @@ mod player_conn_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
         let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false).await;
         let username = "username";
         let login_request = LoginCredentials {
@@ -671,7 +789,8 @@ mod player_conn_tests {
             config: JeopardyConfig::test_default(),
         };
         let username = "username";
-        let (state, _) = new_test_server_with_player(create_lobby_request.clone(), username).await;
+        let (state, _) =
+            new_test_server_state_with_player(create_lobby_request.clone(), username).await;
         let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false).await;
         let login_request = LoginCredentials {
             lobby_id: create_lobby_request.lobby_name,
@@ -703,7 +822,7 @@ mod player_conn_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server_with_test_manager(Some(create_lobby_request.clone())).await;
+        let state = new_test_manager_server_state(Some(create_lobby_request.clone())).await;
         state.manager().write().await.set_always_fail(); // lobby lookup should fail
         let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false).await;
         let username = "username";
@@ -736,7 +855,7 @@ mod player_conn_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
         let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false).await;
         let username = "username";
         let login_request = LoginCredentials {
@@ -746,12 +865,7 @@ mod player_conn_tests {
         };
 
         // preconditions
-        let manager_rg = state.manager().read().await;
-        let lobby = manager_rg.get(lobby_name).unwrap().lobby();
-        let shutdown_handle = lobby.shutdown().await.unwrap();
-        shutdown_handle.await.unwrap();
-        assert!(lobby.is_shutdown()); // ensure lobby is shut down so add fails
-        drop(manager_rg); // drop mutex or else this hangs
+        shutdown_lobby(&state, lobby_name).await; // ensure lobby is shut down so add fails
 
         // WHEN
         let result = player_conn.join_lobby(login_request).await;
@@ -759,9 +873,126 @@ mod player_conn_tests {
         // THEN
         assert!(matches!(
             result,
-            Err(PlayerHandlerError::Internal(InternalError::Dependency(..)))
+            Err(PlayerHandlerError::Internal(InternalError::InactiveLobby(
+                ..
+            )))
         ));
         // can't check has_player() bc lobby is shut down
+        assert!(player_conn.creds.is_none());
+    }
+
+    // leave_lobby() tests
+
+    #[tokio::test]
+    async fn GIVEN_logged_in_player_conns_WHEN_leave_lobby_THEN_ok() {
+        // GIVEN
+        // more than one player so that the lobby doesn't get deleted
+        let usernames = vec!["player1".to_string(), "player2".to_string()];
+        let lobby_name = "lobby_name";
+        let (state, mut player_conns) =
+            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+
+        // WHEN
+        let player = player_conns[0].leave_lobby().await.unwrap();
+
+        // THEN
+        let expected_player_id = &usernames[0];
+        assert_eq!(expected_player_id, player.id()); // returned player is correct
+
+        let has_player = lobby_has_player(&state, lobby_name, expected_player_id).await;
+        assert_eq!(false, has_player); // lobby still exists bc player_count > 0
+
+        assert!(player_conns[0].creds.is_none());
+    }
+
+    #[tokio::test]
+    async fn GIVEN_last_player_WHEN_leave_lobby_THEN_ok() {
+        // GIVEN
+        let usernames = vec!["player1".to_string()];
+        let lobby_name = "lobby_name";
+        let (state, mut player_conns) =
+            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+
+        // WHEN
+        let player = player_conns[0].leave_lobby().await.unwrap();
+
+        // THEN
+        let expected_player_id = &usernames[0];
+        assert_eq!(expected_player_id, player.id()); // returned player is correct
+
+        let has_lobby = state.manager().read().await.has(lobby_name).unwrap();
+        assert_eq!(false, has_lobby); // lobby was deleted bc empty
+
+        assert!(player_conns[0].creds.is_none());
+    }
+
+    #[tokio::test]
+    async fn GIVEN_not_logged_in_player_conn_WHEN_leave_lobby_THEN_error() {
+        let state = new_test_server_state(None).await; // no lobby to log in to
+        let (mut player_conn, _, _) = new_test_player_conn(state, false).await; // not logged in
+
+        // WHEN
+        let result = player_conn.leave_lobby().await;
+
+        // THEN
+        assert!(matches!(
+            result,
+            Err(InternalError::MissingLoginCredentials)
+        ));
+    }
+
+    #[tokio::test]
+    async fn GIVEN_failing_manager_WHEN_leave_lobby_THEN_error() {
+        let username = "player1";
+        let lobby_name = "lobby_name";
+        let (state, mut player_conn) =
+            new_test_manager_server_state_with_logged_in_player(username, lobby_name).await;
+        state.manager().write().await.set_always_fail();
+
+        // WHEN
+        let result = player_conn.leave_lobby().await;
+
+        // THEN
+        assert!(matches!(result, Err(InternalError::Dependency(..))));
+        assert!(player_conn.creds.is_none());
+        // if leaving fails, there are only 2 cases:
+        // - lobby/player is already gone, therefore this call can be safely ignored
+        // - if we get an unexpected error, this bars us from cleanup and allows the lobby to continue
+        //   (as send_background ignores the error). however, this is improper and is essentially a memory leak
+        //   TODO: have stagecrew lobby remove player upon error
+    }
+
+    #[tokio::test]
+    async fn GIVEN_shutdown_lobby_WHEN_leave_lobby_THEN_error() {
+        // GIVEN
+        let username = "player1";
+        let lobby_name = "lobby_name";
+        let (state, mut player_conns) =
+            new_test_server_state_with_logged_in_players(vec![username.to_string()], lobby_name)
+                .await;
+        shutdown_lobby(&state, lobby_name).await; // shut down lobby so it fails
+
+        // WHEN
+        let result = player_conns[0].leave_lobby().await;
+
+        // THEN
+        assert!(matches!(result, Err(InternalError::InactiveLobby(..))));
+        assert!(player_conns[0].creds.is_none());
+    }
+
+    #[tokio::test]
+    async fn GIVEN_failing_manager_with_last_player_WHEN_leave_lobby_THEN_error() {
+        let username = "player1";
+        let lobby_name = "lobby_name";
+        let (state, mut player_conn) =
+            new_test_manager_server_state_with_logged_in_player(username, lobby_name).await;
+        state.manager().write().await.set_fail_after_n(1); // let lookup pass but fail during delete lobby (manager.get)
+
+        // WHEN
+        let result = player_conn.leave_lobby().await;
+
+        // THEN
+        assert!(matches!(result, Err(InternalError::Dependency(..))));
         assert!(player_conn.creds.is_none());
     }
 }

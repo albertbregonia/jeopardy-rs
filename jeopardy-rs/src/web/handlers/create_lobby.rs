@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::game::Jeopardy;
 use crate::game::jeopardy::config::JeopardyConfig;
-use crate::server::{CredsValidatorGeneric, GenericJeopardyServerState, ManagerGeneric};
+use crate::server::{CredsValidatorGeneric, JeopardyServerStateGeneric, ManagerGeneric};
 use crate::web::handlers::delete_lobby::DeleteLobbyRequest;
 use crate::web::handlers::validators::CredsValidator;
 
@@ -44,7 +44,7 @@ fn is_valid_create_lobby_request(
 /// Top level handler for creating a lobby in `JeopardyServer`.
 /// Creates a lobby and auto-deletes it if the lobby is still empty after the grace period.
 pub async fn create_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
-    State(state): State<GenericJeopardyServerState<M, C>>,
+    State(state): State<JeopardyServerStateGeneric<M, C>>,
     Extension(request_id_uuid): Extension<Uuid>,
     Json(request): Json<CreateLobbyRequest>,
 ) -> (StatusCode, Json<CreateLobbyResponse>) {
@@ -168,109 +168,6 @@ pub async fn create_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
 }
 
 #[cfg(test)]
-pub mod create_lobby_test_util {
-    use std::sync::Arc;
-
-    use super::*;
-    use crate::{
-        game::{
-            Jeopardy,
-            player::{JeopardyPlayer, JeopardyPlayerEvent},
-        },
-        server::{JeopardyServer, JeopardyServerState, ServerConfig, TestDefault},
-        web::handlers::validators::nonzero_ascii::NonZeroAsciiValidator,
-    };
-    use stagecrew::manager::{Manager, ManagerEntry, test_manager_constructs::TestManager};
-    use tokio::sync::mpsc;
-
-    // helper function for the positive test case
-    // primarily used for delete_lobby tests as they need a lobby to delete one
-    pub async fn new_test_server(create_lobby: Option<CreateLobbyRequest>) -> JeopardyServerState {
-        // GIVEN
-        let state = Arc::new(JeopardyServer::from_config(ServerConfig::test_default()));
-
-        if let Some(request) = create_lobby {
-            let lobby_name = request.lobby_name.clone();
-            // WHEN
-            let (status_code, result) = super::create_lobby(
-                State(state.clone()),
-                Extension(Uuid::new_v4()),
-                Json(request),
-            )
-            .await;
-
-            // THEN
-            assert_eq!(status_code, StatusCode::CREATED);
-            assert!(matches!(
-                result,
-                Json(CreateLobbyResponse { error: None, .. })
-            ));
-            let lobby_exists = state.manager().read().await.has(&lobby_name).unwrap();
-            assert!(lobby_exists); // ensure exists
-        }
-        state
-    }
-
-    // create a jeopardy server with a test player given their ID
-    // returns the server state and mpsc::Receiver<_> to listen for broadcasts
-    pub async fn new_test_server_with_player(
-        create_lobby: CreateLobbyRequest,
-        player_id: &str,
-    ) -> (JeopardyServerState, mpsc::Receiver<JeopardyPlayerEvent>) {
-        // GIVEN
-        let state = new_test_server(Some(create_lobby.clone())).await;
-        let (tx, rx) = mpsc::channel(1);
-        let player = JeopardyPlayer::new(player_id.to_string(), tx);
-        state
-            .manager()
-            .write()
-            .await
-            .get(&create_lobby.lobby_name)
-            .unwrap()
-            .lobby() // add test player
-            .add_player(player_id, player)
-            .await
-            .unwrap();
-        (state, rx)
-    }
-
-    // create a jeopardy server with a test manager so we can induce failures
-    pub async fn new_test_server_with_test_manager(
-        create_lobby: Option<CreateLobbyRequest>,
-    ) -> Arc<JeopardyServer<TestManager<PasswordProtectedLobby<Jeopardy>>, NonZeroAsciiValidator>>
-    {
-        // GIVEN
-        let state = Arc::new(JeopardyServer::new(
-            TestManager::default(),
-            NonZeroAsciiValidator::new(32),
-            ServerConfig::test_default(),
-        ));
-        if let Some(request) = create_lobby {
-            state.manager().write().await.set_never_fail();
-            let lobby_name = request.lobby_name.clone();
-            // WHEN
-            let (status_code, result) = super::create_lobby(
-                State(state.clone()),
-                Extension(Uuid::new_v4()),
-                Json(request),
-            )
-            .await;
-
-            // THEN
-            assert_eq!(status_code, StatusCode::CREATED);
-            assert!(matches!(
-                result,
-                Json(CreateLobbyResponse { error: None, .. })
-            ));
-            let lobby_exists = state.manager().read().await.has(&lobby_name).unwrap();
-            assert!(lobby_exists);
-            state.manager().write().await.reset(); // don't count the create lobby operations towards permits
-        }
-        state
-    }
-}
-
-#[cfg(test)]
 #[allow(non_snake_case)]
 mod create_lobby_tests {
 
@@ -279,15 +176,15 @@ mod create_lobby_tests {
     use super::*;
     use crate::{
         server::TestDefault,
-        web::handlers::create_lobby::create_lobby_test_util::{
-            new_test_server, new_test_server_with_player, new_test_server_with_test_manager,
+        web::handlers::test_util::{
+            new_test_manager_server_state, new_test_server_state, new_test_server_state_with_player,
         },
     };
     use stagecrew::manager::Manager;
 
     #[tokio::test]
     async fn GIVEN_valid_create_lobby_request_WHEN_create_lobby_THEN_success() {
-        new_test_server(Some(CreateLobbyRequest {
+        new_test_server_state(Some(CreateLobbyRequest {
             lobby_name: "lobby_name".to_string(),
             lobby_password: "lobby_password".to_string(),
             host_password: "host_password".to_string(),
@@ -302,7 +199,7 @@ mod create_lobby_tests {
         let valid_lobby_name = "lobby_name".to_string();
         let valid_lobby_password = "lobby_password".to_string();
         let valid_host_password = "host_password".to_string();
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
 
         for i in 0..3 {
             // switch which field has the invalid format
@@ -357,7 +254,7 @@ mod create_lobby_tests {
     #[tokio::test]
     async fn GIVEN_invalid_jeopardy_config_WHEN_create_lobby_THEN_error() {
         // GIVEN
-        let state = new_test_server(None).await;
+        let state = new_test_server_state(None).await;
         let lobby_name = "lobby_name".to_string();
 
         // WHEN
@@ -395,7 +292,7 @@ mod create_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
         let manager_len_before = state.manager().read().await.len().unwrap();
 
         // WHEN
@@ -426,7 +323,7 @@ mod create_lobby_tests {
     #[tokio::test]
     async fn GIVEN_failing_manager_during_check_conflict_WHEN_create_lobby_THEN_error() {
         // GIVEN
-        let state = new_test_server_with_test_manager(None).await;
+        let state = new_test_manager_server_state(None).await;
         state.manager().write().await.set_always_fail(); // prevent lobby lookup from passing
         let lobby_name = "lobby_name".to_string();
 
@@ -460,7 +357,7 @@ mod create_lobby_tests {
     #[tokio::test]
     async fn GIVEN_failing_manager_during_create_lobby_WHEN_create_lobby_THEN_error() {
         // GIVEN
-        let state = new_test_server_with_test_manager(None).await;
+        let state = new_test_manager_server_state(None).await;
         state.manager().write().await.set_fail_after_n(1); // let the lobby lookup pass but let the creation fail
         let lobby_name = "lobby_name".to_string();
 
@@ -497,7 +394,7 @@ mod create_lobby_tests {
     async fn GIVEN_empty_lobby_WHEN_grace_period_cleanup_THEN_ok() {
         // GIVEN
         let lobby_name = "lobby_name".to_string();
-        let state = new_test_server(Some(CreateLobbyRequest {
+        let state = new_test_server_state(Some(CreateLobbyRequest {
             lobby_name: lobby_name.clone(),
             lobby_password: "lobby_password".to_string(),
             host_password: "host_password".to_string(),
@@ -525,7 +422,7 @@ mod create_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let (state, _) = new_test_server_with_player(request, "test_player").await;
+        let (state, _) = new_test_server_state_with_player(request, "test_player").await;
 
         // WHEN
         // wait for lobby cleanup task to wake up and no-op

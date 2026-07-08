@@ -141,5 +141,5 @@ impl<T> CredsValidatorGeneric for T where T: CredsValidator + Send + Sync + 'sta
 /// Generic type alias for an `Arc<JeopardyServer<_>>` of any kind.
 /// Using this is important so that handlers are testable with a `TestManager`
 /// that can be configured to error out when we expect.
-pub type GenericJeopardyServerState<ManagerGeneric, CredsValidatorGeneric> =
+pub type JeopardyServerStateGeneric<ManagerGeneric, CredsValidatorGeneric> =
     Arc<JeopardyServer<ManagerGeneric, CredsValidatorGeneric>>;

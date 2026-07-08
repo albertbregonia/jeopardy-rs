@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     game::{JeopardyCommand, JeopardyCommandResponse, JeopardyError},
-    server::{CredsValidatorGeneric, GenericJeopardyServerState, ManagerGeneric},
+    server::{CredsValidatorGeneric, JeopardyServerStateGeneric, ManagerGeneric},
     web::handlers::{serialize_result, validators::CredsValidator},
 };
 use stagecrew::manager::{ManagerEntry, ManagerError};
@@ -59,7 +59,7 @@ fn is_valid_host_request(
 /// This also means that the host doesn't count towards the lobby being empty.
 /// Therefore, if the lobby is deleted bc empty, then their call will simply fail and they can remake.
 pub async fn handle_host_command<M: ManagerGeneric, C: CredsValidatorGeneric>(
-    State(state): State<GenericJeopardyServerState<M, C>>,
+    State(state): State<JeopardyServerStateGeneric<M, C>>,
     Path(lobby_id): Path<String>,
     Extension(request_id): Extension<Uuid>,
     Json(request): Json<HostRequest>,
@@ -210,7 +210,6 @@ mod host_command_tests {
         extract::{Path, State},
         http::StatusCode,
     };
-    use stagecrew::manager::{Manager, ManagerEntry};
     use uuid::Uuid;
 
     use crate::{
@@ -221,13 +220,12 @@ mod host_command_tests {
         },
         server::TestDefault,
         web::handlers::{
-            create_lobby::{
-                CreateLobbyRequest,
-                create_lobby_test_util::{
-                    new_test_server, new_test_server_with_player, new_test_server_with_test_manager,
-                },
-            },
+            create_lobby::CreateLobbyRequest,
             host_command::{HostRequest, HostResponse},
+            test_util::{
+                new_test_manager_server_state, new_test_server_state,
+                new_test_server_state_with_player, shutdown_lobby,
+            },
         },
     };
 
@@ -252,7 +250,8 @@ mod host_command_tests {
             config,
         };
         let player_id = "test_player";
-        let (state, _) = new_test_server_with_player(create_lobby_request.clone(), player_id).await;
+        let (state, _) =
+            new_test_server_state_with_player(create_lobby_request.clone(), player_id).await;
 
         let commands = [
             HostCommand::GetBuzzerQueue,
@@ -378,7 +377,8 @@ mod host_command_tests {
             config: JeopardyConfig::test_default(),
         };
         let player_id = "test_player";
-        let (state, _) = new_test_server_with_player(create_lobby_request.clone(), player_id).await;
+        let (state, _) =
+            new_test_server_state_with_player(create_lobby_request.clone(), player_id).await;
 
         let commands = [
             PlayerCommand::Buzz,
@@ -432,7 +432,8 @@ mod host_command_tests {
             config: JeopardyConfig::test_default(),
         };
         let player_id = "test_player"; // we need a player to run PlayerCommand against
-        let (state, _) = new_test_server_with_player(create_lobby_request.clone(), player_id).await;
+        let (state, _) =
+            new_test_server_state_with_player(create_lobby_request.clone(), player_id).await;
 
         for i in 0..3 {
             // switch which field has the invalid format
@@ -495,7 +496,8 @@ mod host_command_tests {
             config: JeopardyConfig::test_default(),
         };
         let player_id = "test_player"; // we need a player to run PlayerCommand against
-        let (state, _) = new_test_server_with_player(create_lobby_request.clone(), player_id).await;
+        let (state, _) =
+            new_test_server_state_with_player(create_lobby_request.clone(), player_id).await;
 
         for i in 0..3 {
             // switch which field has the invalid format
@@ -552,7 +554,7 @@ mod host_command_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
 
         // WHEN
         let (status_code, response) = super::handle_host_command(
@@ -590,7 +592,7 @@ mod host_command_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
 
         // WHEN
         let (status_code, response) = super::handle_host_command(
@@ -627,7 +629,7 @@ mod host_command_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
 
         // WHEN
         let (status_code, response) = super::handle_host_command(
@@ -664,7 +666,7 @@ mod host_command_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
 
         // WHEN
         let (status_code, response) = super::handle_host_command(
@@ -708,7 +710,7 @@ mod host_command_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server_with_test_manager(Some(create_lobby_request.clone())).await;
+        let state = new_test_manager_server_state(Some(create_lobby_request.clone())).await;
         state.manager().write().await.set_always_fail(); // ensure lobby lookup fails
 
         // WHEN
@@ -748,17 +750,8 @@ mod host_command_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
-        state
-            .manager()
-            .write()
-            .await
-            .get(&create_lobby_request.lobby_name)
-            .unwrap()
-            .lobby()
-            .shutdown()
-            .await
-            .unwrap(); // shut down lobby so it fails
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
+        shutdown_lobby(&state, &create_lobby_request.lobby_name).await; // shut down lobby so it fails
 
         // WHEN
         let (status_code, response) = super::handle_host_command(

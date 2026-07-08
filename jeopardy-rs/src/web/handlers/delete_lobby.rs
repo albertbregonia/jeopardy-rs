@@ -8,11 +8,12 @@ use stagecrew::{
     lobby::LobbyError,
     manager::{ManagerEntry, ManagerError, PasswordProtectedLobby},
 };
+use tokio::sync::RwLockWriteGuard;
 use uuid::Uuid;
 
 use crate::{
     game::{Jeopardy, JeopardyCommand, JeopardyError, commands::host::HostCommand},
-    server::{CredsValidatorGeneric, GenericJeopardyServerState, ManagerGeneric},
+    server::{CredsValidatorGeneric, JeopardyServerStateGeneric, ManagerGeneric},
     web::handlers::validators::CredsValidator,
 };
 
@@ -48,7 +49,7 @@ fn is_valid_delete_lobby_request(
 /// Deletes a lobby immediately if `force`.
 /// Otherwise, checks if the lobby has players and errors out if so.
 pub async fn delete_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
-    State(state): State<GenericJeopardyServerState<M, C>>,
+    State(state): State<JeopardyServerStateGeneric<M, C>>,
     Path(lobby_id): Path<String>,
     Extension(request_id): Extension<Uuid>,
     Json(request): Json<DeleteLobbyRequest>,
@@ -78,7 +79,7 @@ pub async fn delete_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
         lobby_password,
         host_password,
     } = request;
-    let mut manager_wg = state.manager().write().await;
+    let manager_wg = state.manager().write().await;
     let entry = match manager_wg.get(&lobby_id) {
         Ok(lobby) => lobby,
         Err(e) => match e {
@@ -120,7 +121,7 @@ pub async fn delete_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
     tracing::info!("Correct lobby password");
 
     // shutdown lobby if valid
-    match shutdown_lobby(entry, force, host_password).await {
+    match shutdown_lobby_auth(entry, force, host_password).await {
         Ok(opt) => {
             if let Some((status, error_msg)) = opt {
                 // if we get some sort of response back,
@@ -149,7 +150,7 @@ pub async fn delete_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
         },
     }
 
-    if let Err(e) = manager_wg.remove(&lobby_id) {
+    if let Err(e) = shutdown_lobby_and_delete_no_auth(manager_wg, &lobby_id).await {
         // remove can only fail if the id was not found
         // and since we pre-check, that means something else happened
         tracing::error!("Failed to invoke manager to delete lobby: {e}");
@@ -172,7 +173,7 @@ pub async fn delete_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
 }
 
 // helper function so i can use ? on the LobbyErrors
-async fn shutdown_lobby(
+async fn shutdown_lobby_auth(
     entry: &PasswordProtectedLobby<Jeopardy>,
     force: bool,
     host_password: String,
@@ -218,21 +219,44 @@ async fn shutdown_lobby(
         )));
     }
     tracing::info!("Host password correct");
-
-    // shutdown lobby - if it's already shutdown somehow
-    // we're dropping anyways so it will get cleaned up, more of a formality
-
-    // note: there is no unit test for this case failing
-    // bc i cannot induce the shutdown after the password check.
-    // however, the function is already unit tested in `stagecrew`
-    // and type signatures already guarantee that we handle this. so it's ok
-    entry
-        .lobby()
-        .shutdown()
-        .await? // wait for send to actor
-        .await?; // wait until actual shutdown
-    tracing::info!("Lobby successfully shut down");
     Ok(None)
+}
+
+// shutdown lobby - if it's already shutdown somehow
+// we're dropping anyways so it will get cleaned up, more of a formality
+// delete the lobby regardless (lobby errors not propagted upward)
+
+// note: there is no unit test for this case failing
+// bc i cannot induce the shutdown after the password check.
+// however, the function is already unit tested in `stagecrew`
+// and type signatures already guarantee that we handle this. so it's ok
+pub(crate) async fn shutdown_lobby_and_delete_no_auth<M: ManagerGeneric>(
+    mut manager_wg: RwLockWriteGuard<'_, M>,
+    lobby_id: &str,
+) -> Result<PasswordProtectedLobby<Jeopardy>, ManagerError> {
+    let entry = manager_wg.get(lobby_id)?;
+    match entry.lobby().shutdown().await {
+        Ok(shutdown_handle) => {
+            if shutdown_handle.await.is_ok() {
+                tracing::info!("Lobby successfully shut down");
+            } else {
+                tracing::error!("Failed to wait for lobby shutdown. Possibly already shut down");
+            }
+        }
+        Err(e) => match e {
+            LobbyError::ActorShutdown => {
+                tracing::warn!("Lobby already shutdown. No-op");
+            }
+            other => {
+                // we log this as an error!(..) bc it SHOULD NOT happen
+                // but in both cases if the operation didn't work,
+                // we're dropping the lobby anyways so it WILL get shut down
+                // so we continue
+                tracing::error!("Unexpected lobby error during lobby shutdown: {other}");
+            }
+        },
+    };
+    manager_wg.remove(lobby_id)
 }
 
 #[cfg(test)]
@@ -244,9 +268,9 @@ mod delete_lobby_tests {
     use crate::{
         game::jeopardy::config::JeopardyConfig,
         server::TestDefault,
-        web::handlers::create_lobby::{
-            CreateLobbyRequest,
-            create_lobby_test_util::{new_test_server, new_test_server_with_test_manager},
+        web::handlers::{
+            create_lobby::CreateLobbyRequest,
+            test_util::{new_test_manager_server_state, new_test_server_state, shutdown_lobby},
         },
     };
 
@@ -259,7 +283,7 @@ mod delete_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
 
         // WHEN
         let (status_code, response) = super::delete_lobby(
@@ -298,7 +322,7 @@ mod delete_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
 
         for i in 0..3 {
             // switch which field has the invalid format
@@ -359,7 +383,7 @@ mod delete_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
 
         // WHEN
         let (status_code, response) = super::delete_lobby(
@@ -403,7 +427,7 @@ mod delete_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
 
         // WHEN
         let (status_code, response) = super::delete_lobby(
@@ -445,7 +469,7 @@ mod delete_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
 
         // WHEN
         let (status_code, response) = super::delete_lobby(
@@ -489,17 +513,8 @@ mod delete_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
-        state
-            .manager()
-            .read()
-            .await
-            .get(&create_lobby_request.lobby_name)
-            .unwrap()
-            .lobby()
-            .shutdown() // shutdown lobby so it fails at checking host password and no-ops
-            .await
-            .unwrap();
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
+        shutdown_lobby(&state, &create_lobby_request.lobby_name).await; // shutdown lobby so it fails at checking host password and no-ops
 
         // WHEN
         let (status_code, response) = super::delete_lobby(
@@ -538,17 +553,8 @@ mod delete_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server(Some(create_lobby_request.clone())).await;
-        state
-            .manager()
-            .read()
-            .await
-            .get(&create_lobby_request.lobby_name)
-            .unwrap()
-            .lobby()
-            .shutdown() // shutdown lobby so it fails at checking player count and no-ops
-            .await
-            .unwrap();
+        let state = new_test_server_state(Some(create_lobby_request.clone())).await;
+        shutdown_lobby(&state, &create_lobby_request.lobby_name).await; // shutdown lobby so it fails at checking player count and no-ops
 
         // WHEN
         let (status_code, response) = super::delete_lobby(
@@ -589,7 +595,7 @@ mod delete_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server_with_test_manager(Some(create_lobby_request.clone())).await;
+        let state = new_test_manager_server_state(Some(create_lobby_request.clone())).await;
         state.manager().write().await.set_always_fail(); // prevent lookup from passing
 
         // WHEN
@@ -629,7 +635,7 @@ mod delete_lobby_tests {
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
         };
-        let state = new_test_server_with_test_manager(Some(create_lobby_request.clone())).await;
+        let state = new_test_manager_server_state(Some(create_lobby_request.clone())).await;
         state.manager().write().await.set_fail_after_n(1); // allow lookup to pass but delete to fail
 
         // WHEN

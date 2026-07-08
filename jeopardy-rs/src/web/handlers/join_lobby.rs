@@ -8,7 +8,7 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::{
-    server::{CredsValidatorGeneric, GenericJeopardyServerState, ManagerGeneric},
+    server::{CredsValidatorGeneric, JeopardyServerStateGeneric, ManagerGeneric},
     web::handlers::player::{PlayerRequest, PlayerResponse},
 };
 
@@ -18,7 +18,7 @@ use crate::{
 /// to be the login credentials for a lobby. From then on, the connection is managed by
 /// a helper wrapper type `PlayerConn` and `handle_websocket(..)` manages it's lifetime.
 pub async fn join_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
-    State(state): State<GenericJeopardyServerState<M, C>>,
+    State(state): State<JeopardyServerStateGeneric<M, C>>,
     Extension(request_id): Extension<Uuid>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
@@ -44,7 +44,7 @@ pub async fn join_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
 // the canonical way is to test a helper instead of the upgrader with a real websocket
 // therefore, we use a generic JsonConn to allow for easy unit testing
 pub async fn handle_websocket<M, C, T>(
-    _state: GenericJeopardyServerState<M, C>,
+    _state: JeopardyServerStateGeneric<M, C>,
     _socket: JsonConn<T, PlayerRequest, PlayerResponse>,
 ) where
     M: ManagerGeneric,
