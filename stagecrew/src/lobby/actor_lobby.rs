@@ -20,15 +20,20 @@ enum Command<G: Game> {
 }
 
 pub struct Lobby<G: Game> {
-    // NOTE: due to the functionality of mpsc::Sender
-    // when every instance of mpsc::Sender is dropped,
-    // it will signal the mpsc::Receiver to drop
-    // therefore in this case, if lobby_handle is dropped
-    // and there are no clones of it,
-    // the actor will be signaled to shutdown
-    // after processing its last queued message
+    // NOTE: due to the functionality of mpsc::Sender when every instance of mpsc::Sender is dropped,
+    // it will signal the mpsc::Receiver to drop. therefore in this case, if lobby_handle is dropped
+    // and there are no clones of it, the actor will be signaled to shutdown after processing its last queued message
     // (no new messages will be queued)
     lobby_handle: mpsc::Sender<Command<G>>,
+}
+
+/// Cloning a Lobby will only clone the underlying mpsc handle
+impl<G: Game> Clone for Lobby<G> {
+    fn clone(&self) -> Self {
+        Self {
+            lobby_handle: self.lobby_handle.clone(),
+        }
+    }
 }
 
 // public API struct for interacting with underlying ActorLobby
@@ -482,5 +487,18 @@ mod lobby_tests {
 
         // THEN
         assert!(matches!(result, TestEventResponse::GetBool(..)));
+    }
+
+    #[tokio::test]
+    async fn GIVEN_lobby_clone_WHEN_shutdown_THEN_ok() {
+        // GIVEN
+        let lobby = Lobby::default();
+        let clone = lobby.clone();
+
+        // WHEN
+        lobby.shutdown().await.unwrap().await.unwrap();
+
+        // THEN
+        assert!(clone.is_shutdown()); // lobby clones point to the underlying same actor
     }
 }

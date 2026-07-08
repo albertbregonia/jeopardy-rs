@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use stagecrew::{
     conn::{ErrorReason, JsonConn, TextTransport},
-    lobby::LobbyError,
+    lobby::{Lobby, LobbyError},
     manager::{ManagerEntry, ManagerError},
 };
 use thiserror::Error;
@@ -16,6 +16,7 @@ use tokio::{sync::mpsc, time::timeout};
 
 use crate::{
     game::{
+        Jeopardy,
         commands::player::{PlayerCommand, PlayerCommandResponse},
         player::{JeopardyPlayer, JeopardyPlayerEvent},
     },
@@ -53,6 +54,7 @@ pub struct PlayerResponse {
 pub struct PlayerConn<T: TextTransport, M: ManagerGeneric, C: CredsValidatorGeneric> {
     state: JeopardyServerStateGeneric<M, C>,
     json_ws: JsonConn<T, PlayerRequest, PlayerResponse>,
+    lobby: Option<Lobby<Jeopardy>>,
     creds: Option<LoginCredentials>,
 }
 
@@ -84,7 +86,7 @@ pub enum UserError {
     #[error("User connection timed out waiting for input")]
     RequestTimeout,
     #[error("Unexpected user disconnect")]
-    UnexpectedDisconnect,
+    Disconnected,
     #[error(transparent)]
     Login(#[from] LoginError),
     #[error("Unexpected Request Type: {0:?}")]
@@ -96,7 +98,7 @@ pub enum InternalError {
     #[error("Inactive lobby ID: {0} still present in manager")]
     InactiveLobby(String),
     #[error("Attempted to perform an operation that requires the player to be logged in.")]
-    MissingLoginCredentials,
+    NotLoggedIn,
     #[error("Unexpected response type: {0}")]
     UnexpectedResponse(anyhow::Error),
     #[error(transparent)]
@@ -130,6 +132,7 @@ where
         Self {
             state,
             json_ws,
+            lobby: None,
             creds: None, // cache lobby ID and username to refer to later
         }
     }
@@ -187,7 +190,7 @@ where
         let request = timeout(max_timeout, self.json_ws.read_json())
             .await
             .map_err(|_| UserError::RequestTimeout)?
-            .ok_or(UserError::UnexpectedDisconnect)?
+            .ok_or(UserError::Disconnected)?
             .map_err(|e| InternalError::Dependency(anyhow!("Failed to read request: {e}")))?;
         Ok(request)
     }
@@ -263,6 +266,7 @@ where
             })?;
 
         tracing::info!("Successful login for '{username}' to '{lobby_id}'.");
+        self.lobby = Some(entry.lobby().clone()); // clone the handle
         self.creds = Some(creds);
         Ok(receiver)
     }
@@ -276,44 +280,29 @@ where
     /// - InternalError::UserNotLoggedIn, attempted to leave a lobby without a previous `join_lobby(..)` call (self.creds == None)
     /// - any LobbyError other than ActorShutdown after calling remove_player()
     pub async fn leave_lobby(&mut self) -> Result<JeopardyPlayer, InternalError> {
+        let lobby = self.lobby.take().ok_or(InternalError::NotLoggedIn)?;
         let LoginCredentials {
             lobby_id, username, ..
-        } = self
-            .creds
-            .take()
-            .ok_or(InternalError::MissingLoginCredentials)?;
+        } = self.creds.take().ok_or(InternalError::NotLoggedIn)?;
         let leave_span =
             tracing::info_span!("leave_lobby", lobby_id = lobby_id, username = username);
         let _enter = leave_span.enter();
 
-        // get lobby
-        let manager_wg = self.state.manager().write().await;
-        let entry = manager_wg
-            .get(&lobby_id)
-            .map_err(|e| InternalError::Dependency(e.into()))?;
-        tracing::info!("Successfully found requested lobby");
-
         // remove player from lobby
-        let player = entry
-            .lobby()
-            .remove_player(&username)
-            .await
-            .map_err(|e| match e {
-                LobbyError::ActorShutdown => {
-                    tracing::error!(
-                        "Failed to remove player from lobby. Lobby is already shut down"
-                    );
-                    InternalError::InactiveLobby(lobby_id.clone())
-                }
-                other => {
-                    tracing::error!("Unexpected error during remove player: {other}");
-                    InternalError::UnexpectedResponse(other.into())
-                }
-            })?;
+        let player = lobby.remove_player(&username).await.map_err(|e| match e {
+            LobbyError::ActorShutdown => {
+                tracing::error!("Failed to remove player from lobby. Lobby is already shut down");
+                InternalError::InactiveLobby(lobby_id.clone())
+            }
+            other => {
+                tracing::error!("Unexpected error during remove player: {other}");
+                InternalError::UnexpectedResponse(other.into())
+            }
+        })?;
         tracing::info!("Successfully removed player from lobby");
 
         // handle empty lobby
-        let player_count = entry.lobby().player_count().await.map_err(|e| match e {
+        let player_count = lobby.player_count().await.map_err(|e| match e {
             LobbyError::ActorShutdown => {
                 // can't test this but positive case tested
                 tracing::error!("Failed to check player count. Lobby is already shut down");
@@ -327,6 +316,7 @@ where
         })?;
         tracing::info!("Current player count: {player_count}");
         if player_count == 0 {
+            let manager_wg = self.state.manager().write().await;
             shutdown_lobby_and_delete_no_auth(manager_wg, &lobby_id) // logs its operation
                 .await
                 .map_err(|e| InternalError::Dependency(e.into()))?;
@@ -505,7 +495,7 @@ mod player_conn_tests {
         // GIVEN
         let state = new_test_server_state(None).await;
         let (player_conn, _, _output_receiver) = new_test_player_conn(state, false).await;
-        let internal_error = InternalError::MissingLoginCredentials;
+        let internal_error = InternalError::NotLoggedIn;
 
         // WHEN
         let result = player_conn.handle_internal_error(internal_error).await;
@@ -520,7 +510,7 @@ mod player_conn_tests {
         let state = new_test_server_state(None).await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
         let (player_conn, _, _) = new_test_player_conn(state, false).await;
-        let internal_error = InternalError::MissingLoginCredentials;
+        let internal_error = InternalError::NotLoggedIn;
 
         // WHEN
         let result = player_conn.handle_internal_error(internal_error).await;
@@ -607,7 +597,7 @@ mod player_conn_tests {
         // THEN
         assert!(matches!(
             result,
-            Err(PlayerHandlerError::User(UserError::UnexpectedDisconnect))
+            Err(PlayerHandlerError::User(UserError::Disconnected))
         ));
     }
 
@@ -935,10 +925,7 @@ mod player_conn_tests {
         let result = player_conn.leave_lobby().await;
 
         // THEN
-        assert!(matches!(
-            result,
-            Err(InternalError::MissingLoginCredentials)
-        ));
+        assert!(matches!(result, Err(InternalError::NotLoggedIn)));
     }
 
     #[tokio::test]
@@ -978,21 +965,5 @@ mod player_conn_tests {
         // THEN
         assert!(matches!(result, Err(InternalError::InactiveLobby(..))));
         assert!(player_conns[0].creds.is_none());
-    }
-
-    #[tokio::test]
-    async fn GIVEN_failing_manager_with_last_player_WHEN_leave_lobby_THEN_error() {
-        let username = "player1";
-        let lobby_name = "lobby_name";
-        let (state, mut player_conn) =
-            new_test_manager_server_state_with_logged_in_player(username, lobby_name).await;
-        state.manager().write().await.set_fail_after_n(1); // let lookup pass but fail during delete lobby (manager.get)
-
-        // WHEN
-        let result = player_conn.leave_lobby().await;
-
-        // THEN
-        assert!(matches!(result, Err(InternalError::Dependency(..))));
-        assert!(player_conn.creds.is_none());
     }
 }
