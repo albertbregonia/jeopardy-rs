@@ -16,7 +16,7 @@ use tokio::{sync::mpsc, time::timeout};
 
 use crate::{
     game::{
-        Jeopardy,
+        Jeopardy, JeopardyError,
         commands::player::{PlayerCommand, PlayerCommandResponse},
         player::{JeopardyPlayer, JeopardyPlayerEvent},
     },
@@ -102,6 +102,8 @@ pub enum UserError {
     Disconnected,
     #[error(transparent)]
     Login(#[from] LoginError),
+    #[error(transparent)]
+    Game(#[from] JeopardyError),
     #[error("Unexpected Request Type: {0:?}")]
     UnexpectedRequestType(PlayerRequest),
 }
@@ -696,14 +698,19 @@ mod player_conn_tests {
         state: &JeopardyServerStateGeneric<M, C>,
         create_lobby_request: CreateLobbyRequest,
         username: &str,
-    ) -> PlayerConn<MockTextTransport<PlayerRequest>, M, C>
+    ) -> (
+        PlayerConn<MockTextTransport<PlayerRequest>, M, C>,
+        mpsc::Sender<PlayerRequest>,
+        mpsc::Receiver<String>,
+    )
     where
         M: ManagerGeneric,
         C: CredsValidatorGeneric,
     {
         // GIVEN
         let lobby_name = create_lobby_request.lobby_name.clone();
-        let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false, 1).await;
+        let (mut player_conn, input_sender, output_receiver) =
+            new_test_player_conn(state.clone(), false, 1).await;
         let login_request = LoginCredentials {
             // derive login request from create lobby request
             lobby_id: create_lobby_request.lobby_name,
@@ -722,7 +729,7 @@ mod player_conn_tests {
         assert_eq!(player_creds.lobby_password, login_request.lobby_password);
         assert_eq!(player_creds.username, login_request.username);
         assert!(player_conn.lobby.is_some());
-        player_conn
+        (player_conn, input_sender, output_receiver)
     }
 
     // really terrible but it is only needed for the following return signatures
@@ -740,7 +747,15 @@ mod player_conn_tests {
     async fn new_test_server_state_with_logged_in_players(
         usernames: Vec<String>,
         lobby_name: &str,
-    ) -> (JeopardyServerState, Vec<TestPlayerConn>) {
+    ) -> (
+        JeopardyServerState,
+        Vec<(
+            // collection of player conn and the respective mpsc handles for MockConn
+            TestPlayerConn,
+            mpsc::Sender<PlayerRequest>,
+            mpsc::Receiver<String>,
+        )>,
+    ) {
         let request = CreateLobbyRequest {
             lobby_name: lobby_name.to_string(),
             lobby_password: "lobby_password".to_string(),
@@ -759,7 +774,12 @@ mod player_conn_tests {
     async fn new_test_manager_server_state_with_logged_in_player(
         username: &str,
         lobby_name: &str,
-    ) -> (TestManagerServerState, TestManagerPlayerConn) {
+    ) -> (
+        TestManagerServerState,
+        TestManagerPlayerConn,
+        mpsc::Sender<PlayerRequest>,
+        mpsc::Receiver<String>,
+    ) {
         let request = CreateLobbyRequest {
             lobby_name: lobby_name.to_string(),
             lobby_password: "lobby_password".to_string(),
@@ -767,8 +787,9 @@ mod player_conn_tests {
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_manager_server_state(Some(request.clone())).await;
-        let player_conn = new_logged_in_player_conn(&state, request, username).await;
-        (state, player_conn)
+        let (player_conn, input_sender, output_receiver) =
+            new_logged_in_player_conn(&state, request, username).await;
+        (state, player_conn, input_sender, output_receiver)
     }
 
     // join_lobby() tests
@@ -957,9 +978,10 @@ mod player_conn_tests {
         let lobby_name = "lobby_name";
         let (state, mut player_conns) =
             new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+        let (player_conn, _, _) = &mut player_conns[0];
 
         // WHEN
-        let player = player_conns[0].leave_lobby().await.unwrap();
+        let player = player_conn.leave_lobby().await.unwrap();
 
         // THEN
         let expected_player_id = &usernames[0];
@@ -968,8 +990,8 @@ mod player_conn_tests {
         let has_player = lobby_has_player(&state, lobby_name, expected_player_id).await;
         assert_eq!(false, has_player); // lobby still exists bc player_count > 0
 
-        assert!(player_conns[0].lobby.is_none());
-        assert!(player_conns[0].creds.is_none());
+        assert!(player_conn.lobby.is_none());
+        assert!(player_conn.creds.is_none());
     }
 
     #[tokio::test]
@@ -979,9 +1001,10 @@ mod player_conn_tests {
         let lobby_name = "lobby_name";
         let (state, mut player_conns) =
             new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+        let (player_conn, _, _) = &mut player_conns[0];
 
         // WHEN
-        let player = player_conns[0].leave_lobby().await.unwrap();
+        let player = player_conn.leave_lobby().await.unwrap();
 
         // THEN
         let expected_player_id = &usernames[0];
@@ -990,8 +1013,8 @@ mod player_conn_tests {
         let has_lobby = state.manager().read().await.has(lobby_name).unwrap();
         assert_eq!(false, has_lobby); // lobby was deleted bc empty
 
-        assert!(player_conns[0].lobby.is_none());
-        assert!(player_conns[0].creds.is_none());
+        assert!(player_conn.lobby.is_none());
+        assert!(player_conn.creds.is_none());
     }
 
     #[tokio::test]
@@ -1025,7 +1048,7 @@ mod player_conn_tests {
     async fn GIVEN_failing_manager_WHEN_leave_lobby_THEN_error() {
         let username = "player1";
         let lobby_name = "lobby_name";
-        let (state, mut player_conn) =
+        let (state, mut player_conn, _, _) =
             new_test_manager_server_state_with_logged_in_player(username, lobby_name).await;
 
         // preconditions
@@ -1053,17 +1076,18 @@ mod player_conn_tests {
         let (state, mut player_conns) =
             new_test_server_state_with_logged_in_players(vec![username.to_string()], lobby_name)
                 .await;
+        let (player_conn, _, _) = &mut player_conns[0];
 
         // preconditions
         shutdown_lobby(&state, lobby_name).await; // shut down lobby so it fails
 
         // WHEN
-        let result = player_conns[0].leave_lobby().await;
+        let result = player_conn.leave_lobby().await;
 
         // THEN
         assert!(matches!(result, Err(InternalError::InactiveLobby(..))));
-        assert!(player_conns[0].lobby.is_none());
-        assert!(player_conns[0].creds.is_none());
+        assert!(player_conn.lobby.is_none());
+        assert!(player_conn.creds.is_none());
     }
 
     // login_loop() tests
