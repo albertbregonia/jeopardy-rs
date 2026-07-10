@@ -122,7 +122,7 @@ mod jeopardy_config_tests {
         let result = JeopardyConfig::new(boards, FinalJeopardy::test_default());
 
         // THEN
-        assert!(matches!(result, Err(JeopardyBoardError::EmptyBoardList)))
+        assert!(matches!(result, Err(JeopardyBoardError::EmptyBoardList)));
     }
 
     #[test]
@@ -137,6 +137,6 @@ mod jeopardy_config_tests {
         let result = serde_json::from_value::<JeopardyConfig>(json);
 
         // THEN
-        assert!(matches!(result, Err(serde_json::Error { .. })))
+        assert!(matches!(result, Err(serde_json::Error { .. })));
     }
 }

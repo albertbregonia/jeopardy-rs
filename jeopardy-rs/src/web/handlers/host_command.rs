@@ -294,7 +294,7 @@ mod host_command_tests {
                     result: Ok(JeopardyCommandResponse::Host(..)),
                     ..
                 })
-            ))
+            ));
         }
 
         // test that every `ShowQuestion` passes - more exahustive than really necessary tbh
@@ -331,7 +331,7 @@ mod host_command_tests {
                             result: Ok(JeopardyCommandResponse::Host(..)),
                             ..
                         })
-                    ))
+                    ));
                 }
             }
         }
@@ -362,7 +362,7 @@ mod host_command_tests {
                     result: Ok(JeopardyCommandResponse::Host(..)),
                     ..
                 })
-            ))
+            ));
         }
     }
 
@@ -416,7 +416,7 @@ mod host_command_tests {
                     result: Ok(JeopardyCommandResponse::Player(..)),
                     ..
                 })
-            ))
+            ));
         }
     }
 

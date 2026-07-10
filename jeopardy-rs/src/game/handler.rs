@@ -1014,7 +1014,7 @@ mod handler_tests {
             result,
             Err(JeopardyError::InvalidBoardIndex(index))
                 if index == invalid_board_index
-        ))
+        ));
     }
 
     #[tokio::test]
@@ -1076,7 +1076,7 @@ mod handler_tests {
             result,
             Err(JeopardyError::InvalidBoardIndex(index))
                 if index == invalid_board_index
-        ))
+        ));
     }
 
     #[tokio::test]
@@ -1152,7 +1152,7 @@ mod handler_tests {
                             rx.recv().await.unwrap(),
                             JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard{title, content})
                                 if title == expected_title && content == expected_content
-                        ))
+                        ));
                     }
                 }
             }
@@ -1261,7 +1261,7 @@ mod handler_tests {
                             rx.recv().await.unwrap(),
                             JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard{title, content})
                                 if title == question.content() && content == question.answer()
-                        ))
+                        ));
                     }
                 }
             }
@@ -1332,7 +1332,7 @@ mod handler_tests {
                 rx.recv().await.unwrap(),
                 JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard { title, content })
                     if title == expected_title && content == expected_content
-            ))
+            ));
         }
     }
 
@@ -1363,7 +1363,7 @@ mod handler_tests {
                 rx.recv().await.unwrap(),
                 JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard { title, content })
                     if title == expected_title && content == expected_answer
-            ))
+            ));
         }
     }
 

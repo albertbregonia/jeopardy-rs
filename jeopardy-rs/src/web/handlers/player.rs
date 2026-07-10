@@ -651,7 +651,7 @@ mod player_conn_tests {
         assert!(matches!(
             result,
             Err(PlayerHandlerError::User(UserError::RequestTimeout))
-        ))
+        ));
     }
 
     #[tokio::test]

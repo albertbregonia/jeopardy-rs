@@ -259,7 +259,7 @@ mod json_conn_tests {
         let result = mock_conn.read_json().await.unwrap();
 
         // THEN
-        assert!(matches!(result, Err(JsonConnError::Json(..)),));
+        assert!(matches!(result, Err(JsonConnError::Json(..))));
     }
 
     // send_json() tests
