@@ -230,7 +230,7 @@ async fn shutdown_lobby_auth(
 // bc i cannot induce the shutdown after the password check.
 // however, the function is already unit tested in `stagecrew`
 // and type signatures already guarantee that we handle this. so it's ok
-pub(crate) async fn shutdown_lobby_and_delete_no_auth<M: ManagerGeneric>(
+pub(super) async fn shutdown_lobby_and_delete_no_auth<M: ManagerGeneric>(
     mut manager_wg: RwLockWriteGuard<'_, M>,
     lobby_id: &str,
 ) -> Result<PasswordProtectedLobby<Jeopardy>, ManagerError> {

@@ -16,7 +16,7 @@ use tokio::{sync::mpsc, time::timeout};
 
 use crate::{
     game::{
-        Jeopardy, JeopardyError,
+        Jeopardy, JeopardyCommand, JeopardyCommandResponse, JeopardyError,
         commands::player::{PlayerCommand, PlayerCommandResponse},
         player::{JeopardyPlayer, JeopardyPlayerEvent},
     },
@@ -393,6 +393,64 @@ where
             LoginError::ExceededAttemptLimit,
         )))
     }
+
+    async fn handle_player_command(
+        &mut self,
+        command: PlayerCommand,
+    ) -> Result<(), PlayerHandlerError> {
+        let LoginCredentials {
+            lobby_id, username, ..
+        } = self.creds.as_ref().ok_or(InternalError::NotLoggedIn)?;
+        let lobby = self.lobby.as_ref().ok_or(InternalError::NotLoggedIn)?;
+
+        let cmd_span = tracing::info_span!("handle_player_command", lobby_id=lobby_id, username=username, command=?command);
+        let _entered = cmd_span.enter();
+
+        // send to lobby
+        let game_response = lobby
+            .send_game_event_and_wait(JeopardyCommand::Player {
+                player_id: username.to_string(),
+                command,
+            })
+            .await
+            .map_err(|e| match e {
+                LobbyError::ActorShutdown => InternalError::InactiveLobby(lobby_id.clone()),
+                other => InternalError::UnexpectedResponse(anyhow!(
+                    "Unexpected error during send game event to lobby: {other}"
+                )),
+            })
+            .inspect_err(|e| tracing::error!("Failed to route command to lobby: {e}"))?;
+
+        // handle response
+        match game_response {
+            Ok(response) => match response {
+                JeopardyCommandResponse::Player(response) => {
+                    tracing::info!("Successfully obtained player response: {response:?}");
+                    self.send_response(response).await.inspect_err(|e| {
+                        tracing::error!("Failed to send response to player: {e}")
+                    })?;
+                }
+                other => {
+                    // can't test this but that's the point
+                    let error_msg = format!(
+                        "Received non-player response for during player command handling: {other:?}"
+                    );
+                    tracing::error!(error_msg);
+                    return Err(PlayerHandlerError::Internal(
+                        InternalError::UnexpectedResponse(anyhow!(error_msg)),
+                    ));
+                }
+            },
+            Err(jeopardy_error) => {
+                tracing::warn!("Player command returned a game error: {jeopardy_error}");
+                self.send_recoverable_user_error(jeopardy_error.into())
+                    .await
+                    .map_err(|e| InternalError::Dependency(e.into()))
+                    .inspect_err(|e| tracing::error!("Failed to send game error to player: {e}"))?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -405,14 +463,16 @@ mod player_conn_tests {
         },
         player::Player,
     };
+    use std::assert_matches;
     use std::time::Duration;
     use tokio::sync::mpsc;
 
     use crate::{
         game::{
-            Jeopardy,
+            Jeopardy, JeopardyError,
             commands::player::{PlayerCommand, PlayerCommandResponse},
             jeopardy::config::JeopardyConfig,
+            player::JeopardyPlayerError,
         },
         server::{
             CredsValidatorGeneric, JeopardyServerState, JeopardyServerStateGeneric, ManagerGeneric,
@@ -434,7 +494,7 @@ mod player_conn_tests {
 
     // helper to create a player conn that uses an mpsc to simulate a websocket
     // cannot use TestDefault bc async and we need to return the mpsc handles
-    async fn new_test_player_conn<M: ManagerGeneric, C: CredsValidatorGeneric>(
+    fn new_test_player_conn<M: ManagerGeneric, C: CredsValidatorGeneric>(
         state: JeopardyServerStateGeneric<M, C>,
         fail_during_read_text: bool,
         buffer_size: usize,
@@ -455,7 +515,7 @@ mod player_conn_tests {
     async fn GIVEN_player_conn_WHEN_send_response_THEN_ok() {
         // GIVEN
         let state = new_test_server_state(None).await;
-        let (mut player_conn, _, mut output_receiver) = new_test_player_conn(state, false, 1).await;
+        let (mut player_conn, _, mut output_receiver) = new_test_player_conn(state, false, 1);
         let response = PlayerCommandResponse::Success;
 
         // WHEN
@@ -474,7 +534,7 @@ mod player_conn_tests {
         // GIVEN
         let state = new_test_server_state(None).await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
-        let (mut player_conn, _, _) = new_test_player_conn(state, false, 1).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state, false, 1);
 
         // WHEN
         let result = player_conn
@@ -482,7 +542,7 @@ mod player_conn_tests {
             .await;
 
         // THEN
-        assert!(matches!(result, Err(InternalError::Dependency(..))));
+        assert_matches!(result, Err(InternalError::Dependency(..)));
     }
 
     // send_recoverable_user_error() tests
@@ -491,7 +551,7 @@ mod player_conn_tests {
     async fn GIVEN_player_conn_WHEN_send_recoverable_user_error_THEN_ok() {
         // GIVEN
         let state = new_test_server_state(None).await;
-        let (mut player_conn, _, mut output_receiver) = new_test_player_conn(state, false, 1).await;
+        let (mut player_conn, _, mut output_receiver) = new_test_player_conn(state, false, 1);
         let user_error = UserError::Login(LoginError::IncorrectLobbyPassword); // realistic error - we don't want to kill their connection for a typo
         let error_msg = user_error.to_string();
 
@@ -515,14 +575,14 @@ mod player_conn_tests {
         // GIVEN
         let state = new_test_server_state(None).await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
-        let (mut player_conn, _, _) = new_test_player_conn(state, false, 1).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state, false, 1);
         let user_error = UserError::Login(LoginError::IncorrectLobbyPassword);
 
         // WHEN
         let result = player_conn.send_recoverable_user_error(user_error).await;
 
         // THEN
-        assert!(matches!(result, Err(InternalError::Dependency(..))));
+        assert_matches!(result, Err(InternalError::Dependency(..)));
     }
 
     // handle_irrecoverable_user_error() tests
@@ -531,7 +591,7 @@ mod player_conn_tests {
     async fn GIVEN_player_conn_WHEN_send_irrecoverable_user_error_THEN_ok() {
         // GIVEN
         let state = new_test_server_state(None).await;
-        let (player_conn, _, _output_receiver) = new_test_player_conn(state, false, 1).await;
+        let (player_conn, _, _output_receiver) = new_test_player_conn(state, false, 1);
         let user_error = UserError::RequestTimeout; // realistic error - if soft lock, we want to kill the connection
 
         // WHEN
@@ -548,7 +608,7 @@ mod player_conn_tests {
         // GIVEN
         let state = new_test_server_state(None).await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
-        let (player_conn, _, _) = new_test_player_conn(state, false, 1).await;
+        let (player_conn, _, _) = new_test_player_conn(state, false, 1);
         let user_error = UserError::RequestTimeout; // realistic error - if soft lock, we want to kill the connection
 
         // WHEN
@@ -557,7 +617,7 @@ mod player_conn_tests {
             .await;
 
         // THEN
-        assert!(matches!(result, Err(InternalError::Dependency(..))));
+        assert_matches!(result, Err(InternalError::Dependency(..)));
     }
 
     // handle_internal_server_error() tests
@@ -566,7 +626,7 @@ mod player_conn_tests {
     async fn GIVEN_player_conn_WHEN_handle_internal_error_THEN_ok() {
         // GIVEN
         let state = new_test_server_state(None).await;
-        let (player_conn, _, _output_receiver) = new_test_player_conn(state, false, 1).await;
+        let (player_conn, _, _output_receiver) = new_test_player_conn(state, false, 1);
         let internal_error = InternalError::NotLoggedIn;
 
         // WHEN
@@ -581,14 +641,14 @@ mod player_conn_tests {
         // GIVEN
         let state = new_test_server_state(None).await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
-        let (player_conn, _, _) = new_test_player_conn(state, false, 1).await;
+        let (player_conn, _, _) = new_test_player_conn(state, false, 1);
         let internal_error = InternalError::NotLoggedIn;
 
         // WHEN
         let result = player_conn.handle_internal_error(internal_error).await;
 
         // THEN
-        assert!(matches!(result, Err(InternalError::Dependency(..))));
+        assert_matches!(result, Err(InternalError::Dependency(..)));
     }
 
     // read_request_with_timeout() tests
@@ -603,7 +663,7 @@ mod player_conn_tests {
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server_state(Some(create_lobby_request.clone())).await;
-        let (mut player_conn, input_sender, _) = new_test_player_conn(state, false, 1).await;
+        let (mut player_conn, input_sender, _) = new_test_player_conn(state, false, 1);
         let login_request = LoginCredentials {
             // derive login request from create lobby request
             lobby_id: create_lobby_request.lobby_name,
@@ -640,7 +700,7 @@ mod player_conn_tests {
         // GIVEN
         let state = new_test_server_state(None).await;
         // we don't drop the input sender so that we have a valid connection but player_conn times out bc we don't send anything
-        let (mut player_conn, _input_sender, _) = new_test_player_conn(state, false, 1).await;
+        let (mut player_conn, _input_sender, _) = new_test_player_conn(state, false, 1);
 
         // WHEN
         let result = player_conn
@@ -648,10 +708,10 @@ mod player_conn_tests {
             .await;
 
         // THEN
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(PlayerHandlerError::User(UserError::RequestTimeout))
-        ));
+        );
     }
 
     #[tokio::test]
@@ -659,7 +719,7 @@ mod player_conn_tests {
         // GIVEN
         let state = new_test_server_state(None).await;
         // drop both input sender and output receiver so that the underlying read_json() errors
-        let (mut player_conn, _, _) = new_test_player_conn(state, false, 1).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state, false, 1);
 
         // WHEN
         let result = player_conn
@@ -667,10 +727,10 @@ mod player_conn_tests {
             .await;
 
         // THEN
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(PlayerHandlerError::User(UserError::Disconnected))
-        ));
+        );
     }
 
     #[tokio::test]
@@ -678,7 +738,7 @@ mod player_conn_tests {
         // GIVEN
         let state = new_test_server_state(None).await;
         // set `fail_during_read_text` to true to cascade the error (TextTransport errors => JsonConn errors => PlayerConn errors)
-        let (mut player_conn, _, _) = new_test_player_conn(state, true, 1).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state, true, 1);
 
         // WHEN
         let result = player_conn
@@ -686,10 +746,10 @@ mod player_conn_tests {
             .await;
 
         // THEN
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(PlayerHandlerError::Internal(InternalError::Dependency(..)))
-        ));
+        );
     }
 
     // helper built out of GIVEN_valid_creds_WHEN_join_lobby_THEN_ok
@@ -710,7 +770,7 @@ mod player_conn_tests {
         // GIVEN
         let lobby_name = create_lobby_request.lobby_name.clone();
         let (mut player_conn, input_sender, output_receiver) =
-            new_test_player_conn(state.clone(), false, 1).await;
+            new_test_player_conn(state.clone(), false, 1);
         let login_request = LoginCredentials {
             // derive login request from create lobby request
             lobby_id: create_lobby_request.lobby_name,
@@ -804,7 +864,7 @@ mod player_conn_tests {
     async fn GIVEN_invalid_lobby_WHEN_join_lobby_THEN_error() {
         // GIVEN
         let state = new_test_server_state(None).await;
-        let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false, 1).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false, 1);
         let invalid_lobby_name = "INVALID"; // no lobbies exist so this is invalid
 
         // WHEN
@@ -817,12 +877,12 @@ mod player_conn_tests {
             .await;
 
         // THEN
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(PlayerHandlerError::User(UserError::Login(
                 LoginError::LobbyNotFound
             )))
-        ));
+        );
         // can't check has_player() for lobby that doesn't exist
         assert!(player_conn.lobby.is_none());
         assert!(player_conn.creds.is_none());
@@ -839,7 +899,7 @@ mod player_conn_tests {
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server_state(Some(create_lobby_request.clone())).await;
-        let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false, 1).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false, 1);
         let username = "username";
         let login_request = LoginCredentials {
             lobby_id: create_lobby_request.lobby_name,
@@ -851,12 +911,12 @@ mod player_conn_tests {
         let result = player_conn.join_lobby(login_request).await;
 
         // THEN
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(PlayerHandlerError::User(UserError::Login(
                 LoginError::IncorrectLobbyPassword
             )))
-        ));
+        );
         assert_eq!(false, lobby_has_player(&state, lobby_name, username).await); // not added
         assert!(player_conn.lobby.is_none());
         assert!(player_conn.creds.is_none());
@@ -875,7 +935,7 @@ mod player_conn_tests {
         let username = "username";
         let (state, _) =
             new_test_server_state_with_player(create_lobby_request.clone(), username).await;
-        let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false, 1).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false, 1);
         let login_request = LoginCredentials {
             lobby_id: create_lobby_request.lobby_name,
             lobby_password: create_lobby_request.lobby_password,
@@ -886,12 +946,12 @@ mod player_conn_tests {
         let result = player_conn.join_lobby(login_request).await;
 
         // THEN
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(PlayerHandlerError::User(UserError::Login(
                 LoginError::UsernameAlreadyTaken
             )))
-        ));
+        );
         // player not added guaranteed by lobby.add_player() call
         assert!(player_conn.lobby.is_none());
         assert!(player_conn.creds.is_none());
@@ -909,7 +969,7 @@ mod player_conn_tests {
         };
         let state = new_test_manager_server_state(Some(create_lobby_request.clone())).await;
         state.manager().write().await.set_always_fail(); // lobby lookup should fail
-        let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false, 1).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false, 1);
         let username = "username";
         let login_request = LoginCredentials {
             lobby_id: create_lobby_request.lobby_name,
@@ -922,10 +982,10 @@ mod player_conn_tests {
 
         // THEN
         state.manager().write().await.set_never_fail();
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(PlayerHandlerError::Internal(InternalError::Dependency(..)))
-        ));
+        );
         assert_eq!(false, lobby_has_player(&state, lobby_name, username).await); // not added
         assert!(player_conn.lobby.is_none());
         assert!(player_conn.creds.is_none());
@@ -942,7 +1002,7 @@ mod player_conn_tests {
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server_state(Some(create_lobby_request.clone())).await;
-        let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false, 1).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state.clone(), false, 1);
         let username = "username";
         let login_request = LoginCredentials {
             lobby_id: create_lobby_request.lobby_name,
@@ -957,12 +1017,12 @@ mod player_conn_tests {
         let result = player_conn.join_lobby(login_request).await;
 
         // THEN
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(PlayerHandlerError::Internal(InternalError::InactiveLobby(
                 ..
             )))
-        ));
+        );
         // can't check has_player() bc lobby is shut down
         assert!(player_conn.lobby.is_none());
         assert!(player_conn.creds.is_none());
@@ -1020,7 +1080,7 @@ mod player_conn_tests {
     #[tokio::test]
     async fn GIVEN_not_logged_in_player_conn_WHEN_leave_lobby_THEN_error() {
         let state = new_test_server_state(None).await; // no lobby to log in to
-        let (mut player_conn, _, _) = new_test_player_conn(state, false, 1).await; // not logged in
+        let (mut player_conn, _, _) = new_test_player_conn(state, false, 1); // not logged in
 
         // WHEN
         let result_no_lobby_cached = player_conn.leave_lobby().await;
@@ -1034,14 +1094,8 @@ mod player_conn_tests {
         let result_no_creds_cached = player_conn.leave_lobby().await;
 
         // THEN
-        assert!(matches!(
-            result_no_lobby_cached,
-            Err(InternalError::NotLoggedIn)
-        ));
-        assert!(matches!(
-            result_no_creds_cached,
-            Err(InternalError::NotLoggedIn)
-        ));
+        assert_matches!(result_no_lobby_cached, Err(InternalError::NotLoggedIn));
+        assert_matches!(result_no_creds_cached, Err(InternalError::NotLoggedIn));
     }
 
     #[tokio::test]
@@ -1058,7 +1112,7 @@ mod player_conn_tests {
         let result = player_conn.leave_lobby().await;
 
         // THEN
-        assert!(matches!(result, Err(InternalError::Dependency(..))));
+        assert_matches!(result, Err(InternalError::Dependency(..)));
         // if leaving fails, there are only 2 cases:
         // - lobby/player is already gone, therefore this call can be safely ignored
         // - if we get an unexpected error, this bars us from cleanup and allows the lobby to continue
@@ -1085,7 +1139,7 @@ mod player_conn_tests {
         let result = player_conn.leave_lobby().await;
 
         // THEN
-        assert!(matches!(result, Err(InternalError::InactiveLobby(..))));
+        assert_matches!(result, Err(InternalError::InactiveLobby(..)));
         assert!(player_conn.lobby.is_none());
         assert!(player_conn.creds.is_none());
     }
@@ -1102,7 +1156,7 @@ mod player_conn_tests {
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server_state(Some(request.clone())).await;
-        let (mut player_conn, input_sender, _) = new_test_player_conn(state, false, 1).await;
+        let (mut player_conn, input_sender, _) = new_test_player_conn(state, false, 1);
 
         // preconditions
         input_sender
@@ -1137,7 +1191,7 @@ mod player_conn_tests {
             config: JeopardyConfig::test_default(),
         }))
         .await;
-        let (mut player_conn, input_sender, _) = new_test_player_conn(state, false, 1).await;
+        let (mut player_conn, input_sender, _) = new_test_player_conn(state, false, 1);
 
         // preconditions
         input_sender // send command when login expected
@@ -1149,12 +1203,12 @@ mod player_conn_tests {
         let result = player_conn.login_loop(1, Duration::from_secs(1)).await;
 
         // THEN
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(PlayerHandlerError::User(UserError::UnexpectedRequestType(
                 ..
             )))
-        ));
+        );
 
         assert!(player_conn.creds.is_none());
         assert!(player_conn.lobby.is_none());
@@ -1170,7 +1224,7 @@ mod player_conn_tests {
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server_state(Some(request.clone())).await;
-        let (mut player_conn, input_sender, _) = new_test_player_conn(state, false, 1).await;
+        let (mut player_conn, input_sender, _) = new_test_player_conn(state, false, 1);
         for i in 0..3 {
             // switch which field has the invalid format
             let lobby_id = if i == 0 {
@@ -1202,12 +1256,12 @@ mod player_conn_tests {
             let result = player_conn.login_loop(1, Duration::from_secs(1)).await;
 
             // THEN
-            assert!(matches!(
+            assert_matches!(
                 result,
                 Err(PlayerHandlerError::User(UserError::Login(
                     LoginError::InvalidLoginCredentialsFormat
                 )))
-            ));
+            );
 
             assert!(player_conn.creds.is_none());
             assert!(player_conn.lobby.is_none());
@@ -1226,7 +1280,7 @@ mod player_conn_tests {
         let max_attempts = 3;
         let state = new_test_server_state(Some(request.clone())).await;
         let (mut player_conn, input_sender, _output_receiver) = // we don't drop the input/output hooks so the helpers pass 
-            new_test_player_conn(state, false, max_attempts).await;
+            new_test_player_conn(state, false, max_attempts);
 
         // preconditions
         for _ in 0..max_attempts {
@@ -1248,12 +1302,12 @@ mod player_conn_tests {
 
         // THEN
         // we don't need to test that we get the incorrect password error bc the helper is tested
-        assert!(matches!(
+        assert_matches!(
             result, // ensure we hit attempt limit
             Err(PlayerHandlerError::User(UserError::Login(
                 LoginError::ExceededAttemptLimit
             )))
-        ));
+        );
 
         assert!(player_conn.creds.is_none());
         assert!(player_conn.lobby.is_none());
@@ -1269,8 +1323,7 @@ mod player_conn_tests {
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_manager_server_state(Some(request.clone())).await;
-        let (mut player_conn, input_sender, _) =
-            new_test_player_conn(state.clone(), false, 1).await;
+        let (mut player_conn, input_sender, _) = new_test_player_conn(state.clone(), false, 1);
 
         // preconditions
         state.manager().write().await.set_always_fail();
@@ -1287,11 +1340,111 @@ mod player_conn_tests {
         let result = player_conn.login_loop(1, Duration::from_secs(1)).await;
 
         // THEN
-        assert!(matches!(
+        assert_matches!(
             result, // ensure join_lobby error is propagated
             Err(PlayerHandlerError::Internal(InternalError::Dependency(..)))
-        ));
+        );
         assert!(player_conn.creds.is_none());
         assert!(player_conn.lobby.is_none());
+    }
+
+    #[tokio::test]
+    async fn GIVEN_valid_command_WHEN_handle_player_command_THEN_ok() {
+        // GIVEN
+        let usernames = vec!["player1".to_string()];
+        let lobby_name = "lobby_name";
+        let (_state, mut player_conns) =
+            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+        let (player_conn, _, output) = &mut player_conns[0];
+
+        // WHEN
+        player_conn
+            .handle_player_command(PlayerCommand::Buzz)
+            .await
+            .unwrap();
+
+        // THEN
+        // ensure that the correct response was sent
+        let response = output.recv().await.unwrap();
+        let expected_response = serde_json::to_string(&PlayerResponse {
+            result: Ok(PlayerCommandResponse::Success),
+        })
+        .unwrap();
+        assert_eq!(expected_response, response);
+    }
+
+    #[tokio::test]
+    async fn GIVEN_not_logged_in_WHEN_handle_player_command_THEN_error() {
+        // GIVEN
+        let state = new_test_server_state(None).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state, false, 1);
+
+        // WHEN
+        let result = player_conn.handle_player_command(PlayerCommand::Buzz).await;
+
+        // THEN
+        assert_matches!(
+            result,
+            Err(PlayerHandlerError::Internal(InternalError::NotLoggedIn))
+        );
+    }
+
+    #[tokio::test]
+    async fn GIVEN_shutdown_lobby_WHEN_handle_player_command_THEN_error() {
+        // GIVEN
+        let usernames = vec!["player1".to_string()];
+        let lobby_name = "lobby_name";
+        let (state, mut player_conns) =
+            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+        let (player_conn, _, _) = &mut player_conns[0];
+
+        // preconditions
+        shutdown_lobby(&state, lobby_name).await;
+
+        // WHEN
+        let result = player_conn.handle_player_command(PlayerCommand::Buzz).await;
+
+        // THEN
+        assert_matches!(
+            result,
+            Err(PlayerHandlerError::Internal(InternalError::InactiveLobby(
+                ..
+            )))
+        );
+    }
+
+    #[tokio::test]
+    async fn GIVEN_invalid_command_WHEN_handle_player_command_THEN_error() {
+        // GIVEN
+        let usernames = vec!["player1".to_string()];
+        let lobby_name = "lobby_name";
+        let (_state, mut player_conns) =
+            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+        let (player_conn, _, output) = &mut player_conns[0];
+        let invalid_wager = -1000;
+
+        // WHEN
+        player_conn
+            .handle_player_command(PlayerCommand::SetWager(invalid_wager))
+            .await
+            .unwrap();
+
+        // THEN
+        // ensure that the error was sent over the websocket
+        let response = output.recv().await.unwrap();
+        let expected_response =
+            serde_json::to_string(&PlayerResponse {
+                result: Err(PlayerHandlerError::User(UserError::Game(
+                    JeopardyError::PlayerMisconfig(JeopardyPlayerError::InvalidWager {
+                        wager: invalid_wager,
+                        // lowk this assumes the default points are 0
+                        // but we don't expose a way to obtain the default so it's fine
+                        current_points: 0,
+                    }),
+                ))
+                .to_string()),
+            })
+            .unwrap();
+        assert_eq!(expected_response, response);
     }
 }
