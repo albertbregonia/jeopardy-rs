@@ -97,7 +97,7 @@ impl<E: Error> From<E> for PlayerResponse {
 #[derive(Debug, Error)]
 pub enum UserError {
     #[error("User connection timed out waiting for input")]
-    RequestTimeout,
+    ActivityTimeout,
     #[error("Unexpected user disconnect")]
     Disconnected,
     #[error(transparent)]
@@ -204,7 +204,7 @@ where
     ) -> Result<PlayerRequest, PlayerHandlerError> {
         let request = timeout(max_timeout, self.json_ws.read_json())
             .await
-            .map_err(|_| UserError::RequestTimeout)?
+            .map_err(|_| UserError::ActivityTimeout)?
             .ok_or(UserError::Disconnected)?
             .map_err(|e| InternalError::Dependency(anyhow!("Failed to read request: {e}")))?;
         Ok(request)
@@ -451,6 +451,66 @@ where
         }
         Ok(())
     }
+
+    pub async fn main(
+        &mut self,
+        mut event_receiver: mpsc::Receiver<JeopardyPlayerEvent>,
+        activity_timeout: Duration,
+    ) -> Result<(), PlayerHandlerError> {
+        tracing::info!("Starting main player loop");
+        tracing::info!("Current timeout threshold: {activity_timeout:#?}");
+        loop {
+            // infinitely handle incoming player commands / game events
+            // if the lobby doesn't send anything for a while / if the player hasn't sent anything in a while
+            // we consider that as an inactive connection and forcefully free those resources
+            // this may cascade into the lobby getting freed (when 0 players are in the lobby)
+            let connected = timeout(activity_timeout, async {
+                tokio::select! {
+                    result = self.json_ws.read_json() => match result {
+                        Some(result) => match result {
+                            Ok(request) => {
+                                let PlayerRequest::Command(cmd) = request else {
+                                    tracing::warn!("Received non-command request when expected: {request:?}");
+                                    return Err(PlayerHandlerError::User(UserError::UnexpectedRequestType(request)));
+                                };
+                                tracing::info!("Handling player command: {cmd:#?}");
+                                self.handle_player_command(cmd).await?;
+                                tracing::info!("Command response sent");
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Unexpected connection failure: {e}");
+                                tracing::warn!(error_msg);
+                                return Err(PlayerHandlerError::Internal(InternalError::Dependency(anyhow!(error_msg))));
+                            }
+                        }
+                        None => return Ok(false), // clean ws disconnect
+                    },
+                    // internal send to player handler
+                    result = event_receiver.recv() => match result {
+                        Some(event) => {
+                            tracing::info!("Received Jeopardy game event from lobby");
+                            let response = match event {
+                                JeopardyPlayerEvent::Display(jeopardy_display) =>
+                                    PlayerCommandResponse::Refresh(jeopardy_display),
+                                JeopardyPlayerEvent::PointsUpdate(points) =>
+                                    PlayerCommandResponse::GetPoints(points),
+                            };
+                            tracing::info!("Game event mapped to response: {response:#?}");
+                            self.send_response(response).await?;
+                            tracing::info!("Game event broadcasted");
+                        }
+                        None => return Ok(false), // clean ws disconnect
+                    }
+                }
+                Ok(true)
+            }).await.map_err(|_| UserError::ActivityTimeout)??;
+            if !connected {
+                break;
+            }
+        }
+        tracing::info!("Clean disconnect");
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -470,9 +530,9 @@ mod player_conn_tests {
     use crate::{
         game::{
             Jeopardy, JeopardyError,
-            commands::player::{PlayerCommand, PlayerCommandResponse},
+            commands::player::{JeopardyDisplayEvent, PlayerCommand, PlayerCommandResponse},
             jeopardy::config::JeopardyConfig,
-            player::JeopardyPlayerError,
+            player::{JeopardyPlayerError, JeopardyPlayerEvent},
         },
         server::{
             CredsValidatorGeneric, JeopardyServerState, JeopardyServerStateGeneric, ManagerGeneric,
@@ -529,6 +589,7 @@ mod player_conn_tests {
         .unwrap();
         assert_eq!(raw_msg, expected);
     }
+
     #[tokio::test]
     async fn GIVEN_disconnected_player_conn_WHEN_send_response_THEN_error() {
         // GIVEN
@@ -592,7 +653,7 @@ mod player_conn_tests {
         // GIVEN
         let state = new_test_server_state(None).await;
         let (player_conn, _, _output_receiver) = new_test_player_conn(state, false, 1);
-        let user_error = UserError::RequestTimeout; // realistic error - if soft lock, we want to kill the connection
+        let user_error = UserError::ActivityTimeout; // realistic error - if soft lock, we want to kill the connection
 
         // WHEN
         let result = player_conn
@@ -609,7 +670,7 @@ mod player_conn_tests {
         let state = new_test_server_state(None).await;
         // we drop both the input sender and the output receiver so that the underlying channel fails
         let (player_conn, _, _) = new_test_player_conn(state, false, 1);
-        let user_error = UserError::RequestTimeout; // realistic error - if soft lock, we want to kill the connection
+        let user_error = UserError::ActivityTimeout; // realistic error - if soft lock, we want to kill the connection
 
         // WHEN
         let result = player_conn
@@ -710,7 +771,7 @@ mod player_conn_tests {
         // THEN
         assert_matches!(
             result,
-            Err(PlayerHandlerError::User(UserError::RequestTimeout))
+            Err(PlayerHandlerError::User(UserError::ActivityTimeout))
         );
     }
 
@@ -769,8 +830,11 @@ mod player_conn_tests {
     {
         // GIVEN
         let lobby_name = create_lobby_request.lobby_name.clone();
-        let (mut player_conn, input_sender, output_receiver) =
-            new_test_player_conn(state.clone(), false, 1);
+        let (mut player_conn, input_sender, output_receiver) = new_test_player_conn(
+            state.clone(),
+            false,
+            state.config().player_channel_buffer_size,
+        );
         let login_request = LoginCredentials {
             // derive login request from create lobby request
             lobby_id: create_lobby_request.lobby_name,
@@ -1348,6 +1412,8 @@ mod player_conn_tests {
         assert!(player_conn.lobby.is_none());
     }
 
+    // handle_player_command() tests
+
     #[tokio::test]
     async fn GIVEN_valid_command_WHEN_handle_player_command_THEN_ok() {
         // GIVEN
@@ -1355,7 +1421,7 @@ mod player_conn_tests {
         let lobby_name = "lobby_name";
         let (_state, mut player_conns) =
             new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
-        let (player_conn, _, output) = &mut player_conns[0];
+        let (mut player_conn, _, mut output) = player_conns.remove(0);
 
         // WHEN
         player_conn
@@ -1396,7 +1462,7 @@ mod player_conn_tests {
         let lobby_name = "lobby_name";
         let (state, mut player_conns) =
             new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
-        let (player_conn, _, _) = &mut player_conns[0];
+        let (mut player_conn, _, _) = player_conns.remove(0);
 
         // preconditions
         shutdown_lobby(&state, lobby_name).await;
@@ -1420,7 +1486,7 @@ mod player_conn_tests {
         let lobby_name = "lobby_name";
         let (_state, mut player_conns) =
             new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
-        let (player_conn, _, output) = &mut player_conns[0];
+        let (mut player_conn, _, mut output) = player_conns.remove(0);
         let invalid_wager = -1000;
 
         // WHEN
@@ -1446,5 +1512,173 @@ mod player_conn_tests {
             })
             .unwrap();
         assert_eq!(expected_response, response);
+    }
+
+    // main() tests
+
+    #[tokio::test]
+    async fn GIVEN_valid_command_WHEN_main_THEN_ok() {
+        // GIVEN
+        let usernames = vec!["player1".to_string()];
+        let lobby_name = "lobby_name";
+        let (_state, mut player_conns) =
+            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+        let (mut player_conn, input, mut output) = player_conns.remove(0);
+        let activity_timeout = Duration::from_secs(1);
+
+        // preconditions
+        input
+            .send(PlayerRequest::Command(PlayerCommand::Buzz))
+            .await
+            .unwrap();
+        drop(input); // drop `input` so that the main loop cleanly disconnects - if not main() runs until timeout
+
+        // we can get the mpsc::Receiver from the join_lobby() call but it is easier to test like this
+        let (_player_event_sender, player_event_receiver) = mpsc::channel(1);
+
+        // WHEN
+        player_conn
+            .main(player_event_receiver, activity_timeout)
+            .await
+            .unwrap();
+
+        // THEN
+        let response = output.recv().await.unwrap(); // ensure that we receive the response from the lobby
+        let expected_response = serde_json::to_string(&PlayerResponse {
+            result: Ok(PlayerCommandResponse::Success),
+        })
+        .unwrap();
+        assert_eq!(expected_response, response);
+    }
+
+    #[tokio::test]
+    async fn GIVEN_player_event_WHEN_main_THEN_ok() {
+        // GIVEN
+        let state = new_test_server_state(None).await; // we don't need an actual lobby here, we just sim the events
+        let (mut player_conn, _input, mut output) = new_test_player_conn(state, false, 2);
+        let title = "title".to_string();
+        let content = "content".to_string();
+        let points = 0;
+        let activity_timeout = Duration::from_secs(1);
+
+        // preconditions - queue up player events
+        // we can get the mpsc::Receiver from the join_lobby() call but it is easier to test like this
+        let (player_event_sender, player_event_receiver) = mpsc::channel(2);
+        player_event_sender
+            .send(JeopardyPlayerEvent::PointsUpdate(points))
+            .await
+            .unwrap();
+        player_event_sender
+            .send(JeopardyPlayerEvent::Display(
+                JeopardyDisplayEvent::TextCard {
+                    title: title.clone(),
+                    content: content.clone(),
+                },
+            ))
+            .await
+            .unwrap();
+        // drop `player_event_sender` so that the main loop cleanly disconnects - if not main() runs until timeout
+        // this is equivalent to the lobby kicking a player
+        drop(player_event_sender);
+
+        // WHEN
+        player_conn
+            .main(player_event_receiver, activity_timeout)
+            .await
+            .unwrap();
+
+        // THEN - we test both events here bc they get remapped to standard responses
+        // ensure points update event is received
+        let response = output.recv().await.unwrap();
+        let expected_response = serde_json::to_string(&PlayerResponse {
+            result: Ok(PlayerCommandResponse::GetPoints(points)),
+        })
+        .unwrap();
+        assert_eq!(expected_response, response);
+
+        // ensure text card event is received
+        let response = output.recv().await.unwrap();
+        let expected_response = serde_json::to_string(&PlayerResponse {
+            result: Ok(PlayerCommandResponse::Refresh(
+                JeopardyDisplayEvent::TextCard { title, content },
+            )),
+        })
+        .unwrap();
+        assert_eq!(expected_response, response);
+    }
+
+    #[tokio::test]
+    async fn GIVEN_non_command_request_WHEN_main_THEN_error() {
+        // GIVEN
+        let state = new_test_server_state(None).await; // we don't need an actual lobby here, we just sim the events
+        let (mut player_conn, input, _) = new_test_player_conn(state, false, 1);
+        let activity_timeout = Duration::from_secs(1);
+
+        // preconditions
+        input
+            .send(PlayerRequest::Login(LoginCredentials {
+                lobby_id: "lobby_name".to_string(), // main() isn't expecting a login request and should error out
+                lobby_password: "lobby_password".to_string(),
+                username: "username".to_string(),
+            }))
+            .await
+            .unwrap();
+        let (_player_event_sender, player_event_receiver) = mpsc::channel(1);
+
+        // WHEN
+        let result = player_conn
+            .main(player_event_receiver, activity_timeout)
+            .await;
+
+        // THEN
+        assert_matches!(
+            result,
+            Err(PlayerHandlerError::User(UserError::UnexpectedRequestType(
+                ..
+            )))
+        )
+    }
+
+    #[tokio::test]
+    async fn GIVEN_timeout_WHEN_main_THEN_error() {
+        // GIVEN
+        let state = new_test_server_state(None).await;
+        let activity_timeout = Duration::from_secs(1);
+
+        // precondition: we don't drop the input/output mpsc handles so it is set up for a valid connection,
+        // we just don't send anything so it times out
+        let (mut player_conn, _input, _output) = new_test_player_conn(state, false, 1);
+        let (_player_event_sender, player_event_receiver) = mpsc::channel(1);
+
+        // WHEN
+        let result = player_conn
+            .main(player_event_receiver, activity_timeout)
+            .await;
+
+        // THEN
+        assert_matches!(
+            result,
+            Err(PlayerHandlerError::User(UserError::ActivityTimeout))
+        );
+    }
+
+    #[tokio::test]
+    async fn GIVEN_json_conn_error_WHEN_main_THEN_error() {
+        // GIVEN
+        let state = new_test_server_state(None).await;
+        let (mut player_conn, _, _) = new_test_player_conn(state, true, 1); // fails during read set to `true`
+        let (_player_event_sender, player_event_receiver) = mpsc::channel(1);
+        let activity_timeout = Duration::from_secs(1);
+
+        // WHEN
+        let result = player_conn
+            .main(player_event_receiver, activity_timeout)
+            .await;
+
+        // THEN
+        assert_matches!(
+            result,
+            Err(PlayerHandlerError::Internal(InternalError::Dependency(..)))
+        );
     }
 }

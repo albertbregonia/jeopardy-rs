@@ -24,7 +24,7 @@ pub const JSON_CONFIG_DEFAULT_PATH: &str = "./config.json";
 #[derive(Debug, Deserialize)]
 pub struct ServerConfig {
     pub login_timeout: Duration,
-    pub websocket_timeout: Duration,
+    pub activity_timeout: Duration,
     pub max_retry: usize,
     pub max_username_length: usize,
     pub player_channel_buffer_size: usize,
@@ -35,7 +35,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             login_timeout: Duration::from_mins(5),
-            websocket_timeout: Duration::from_mins(10),
+            activity_timeout: Duration::from_mins(10),
             max_retry: 3,
             max_username_length: 32,
             player_channel_buffer_size: 128,
@@ -65,7 +65,7 @@ impl TestDefault for ServerConfig {
     fn test_default() -> Self {
         Self {
             login_timeout: Duration::from_secs(1),
-            websocket_timeout: Duration::from_secs(2),
+            activity_timeout: Duration::from_secs(2),
             max_retry: 3,
             max_username_length: 32,
             player_channel_buffer_size: 1,
