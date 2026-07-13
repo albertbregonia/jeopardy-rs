@@ -16,7 +16,7 @@ pub enum JsonConnError {
     // we don't care specifically how the underlying dependency broke
     // we just care that it broke and cannot fulfill our operation
     #[error(transparent)]
-    Dependency(#[from] Box<dyn Error>),
+    Dependency(#[from] Box<dyn Error + Send + Sync + 'static>),
 }
 
 pub struct JsonConn<T, I, O>
@@ -38,7 +38,7 @@ pub struct ErrorReason {
 
 // we use `impl Future<>` instead of `async fn` as per compiler suggestion / backwards compatibility
 pub trait TextTransport {
-    type Error: Error + 'static;
+    type Error: Error + Send + Sync + 'static;
     fn read_text(&mut self) -> impl Future<Output = Option<Result<Bytes, Self::Error>>>;
     fn send_text(&mut self, msg: &str) -> impl Future<Output = Result<(), Self::Error>>;
     fn disconnect(
@@ -112,7 +112,7 @@ pub mod json_conn_test_constructs {
     #[derive(Debug, Error)]
     pub enum MockError {
         #[error(transparent)]
-        Derivative(#[from] Box<dyn Error>),
+        Derivative(#[from] Box<dyn Error + Send + Sync + 'static>),
         #[error("MockError Generic error")]
         Generic,
     }

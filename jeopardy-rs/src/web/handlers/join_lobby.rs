@@ -45,7 +45,7 @@ pub async fn join_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
 // therefore, we use a generic JsonConn to allow for easy unit testing
 pub async fn handle_websocket<M, C, T>(
     _state: JeopardyServerStateGeneric<M, C>,
-    _socket: JsonConn<T, PlayerRequest, PlayerResponse>,
+    _json_ws: JsonConn<T, PlayerRequest, PlayerResponse>,
 ) where
     M: ManagerGeneric,
     C: CredsValidatorGeneric,

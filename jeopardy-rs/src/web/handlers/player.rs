@@ -223,7 +223,8 @@ where
             lobby_password,
             username,
         } = &creds;
-        tracing::info!("Attempt to join lobby ID: '{lobby_id}' with username: '{username}'");
+        let join_span = tracing::info_span!("join_lobby", lobby_id = lobby_id, username = username);
+        let _entered = join_span.enter();
 
         // get lobby
         let manager_wg = self.state.manager().read().await;
@@ -237,25 +238,25 @@ where
                 PlayerHandlerError::Internal(InternalError::Dependency(other.into()))
             }
         })?;
-        tracing::info!("Lobby ID: '{lobby_id}' exists.");
+        tracing::info!("Requested lobby exists");
 
         // auth
         if !entry.is_correct_password(lobby_password) {
-            tracing::warn!("Incorrect lobby password.");
+            tracing::warn!("Incorrect lobby password");
             return Err(PlayerHandlerError::User(UserError::Login(
                 LoginError::IncorrectLobbyPassword,
             )));
         }
-        tracing::info!("Successful authZ for '{username}' and lobby ID: '{lobby_id}'");
+        tracing::info!("Successful authZ");
 
         // create player
         // create channel to communicate with the frontend
         // mpsc bc i need direct communication with a specific player if they request for their points, etc.
         // NOTE: lowk wasteful because the call may fail but since the player structs are cheap this is fine
         let buffer_size = self.state.config().player_channel_buffer_size;
-        let (writer, receiver) = mpsc::channel(buffer_size);
-        let player = JeopardyPlayer::new(username.clone(), writer);
-        tracing::info!("Successfully created player object for '{username}'");
+        let (sender, receiver) = mpsc::channel(buffer_size);
+        let player = JeopardyPlayer::new(username.clone(), sender);
+        tracing::info!("Successfully created player object");
 
         // add to lobby
         entry
@@ -331,12 +332,15 @@ where
         })?;
         tracing::info!("Current player count: {player_count}");
         if player_count == 0 {
+            tracing::info!("Lobby is empty, attempting to delete...");
             let manager_wg = self.state.manager().write().await;
             shutdown_lobby_and_delete_no_auth(manager_wg, &lobby_id) // logs its operation
                 .await
                 .map_err(|e| InternalError::Dependency(e.into()))?;
             tracing::info!("Successfully deleted empty lobby");
         }
+
+        tracing::info!("Successful leave lobby");
         Ok(player)
     }
 
@@ -350,11 +354,13 @@ where
     /// - non-login request received (UserError::UnexpectedRequestType)
     /// - request validation
     /// - errors listed from join_lobby()
-    pub async fn login_loop(
+    pub async fn login(
         &mut self,
         max_attempts: usize,
         timeout: Duration,
     ) -> Result<mpsc::Receiver<JeopardyPlayerEvent>, PlayerHandlerError> {
+        let login_span = tracing::info_span!("login", max_attempts=max_attempts, timeout=?timeout);
+        let _enter = login_span.enter();
         for attempt in 1..=max_attempts {
             // read request from frontend
             let request = self.read_request_with_timeout(timeout).await?;
@@ -388,7 +394,7 @@ where
                 },
             }
         }
-        tracing::warn!("Exceeded login attempt limit: {max_attempts}.");
+        tracing::warn!("Exceeded login attempt limit: {max_attempts}");
         Err(PlayerHandlerError::User(UserError::Login(
             LoginError::ExceededAttemptLimit,
         )))
@@ -457,8 +463,10 @@ where
         mut event_receiver: mpsc::Receiver<JeopardyPlayerEvent>,
         activity_timeout: Duration,
     ) -> Result<(), PlayerHandlerError> {
+        let main_span = tracing::info_span!("main", activity_timeout=?activity_timeout);
+        let _entered = main_span.enter();
         tracing::info!("Starting main player loop");
-        tracing::info!("Current timeout threshold: {activity_timeout:#?}");
+
         loop {
             // infinitely handle incoming player commands / game events
             // if the lobby doesn't send anything for a while / if the player hasn't sent anything in a while
@@ -1233,10 +1241,7 @@ mod player_conn_tests {
             .unwrap();
 
         // WHEN
-        let _receiver = player_conn
-            .login_loop(1, Duration::from_secs(1))
-            .await
-            .unwrap();
+        let _receiver = player_conn.login(1, Duration::from_secs(1)).await.unwrap();
 
         // THEN
         // loosely check that join_lobby() worked
@@ -1264,7 +1269,7 @@ mod player_conn_tests {
             .unwrap();
 
         // WHEN
-        let result = player_conn.login_loop(1, Duration::from_secs(1)).await;
+        let result = player_conn.login(1, Duration::from_secs(1)).await;
 
         // THEN
         assert_matches!(
@@ -1317,7 +1322,7 @@ mod player_conn_tests {
                 .unwrap();
 
             // WHEN
-            let result = player_conn.login_loop(1, Duration::from_secs(1)).await;
+            let result = player_conn.login(1, Duration::from_secs(1)).await;
 
             // THEN
             assert_matches!(
@@ -1361,7 +1366,7 @@ mod player_conn_tests {
 
         // WHEN
         let result = player_conn
-            .login_loop(max_attempts, Duration::from_secs(1))
+            .login(max_attempts, Duration::from_secs(1))
             .await;
 
         // THEN
@@ -1401,7 +1406,7 @@ mod player_conn_tests {
             .unwrap();
 
         // WHEN
-        let result = player_conn.login_loop(1, Duration::from_secs(1)).await;
+        let result = player_conn.login(1, Duration::from_secs(1)).await;
 
         // THEN
         assert_matches!(
