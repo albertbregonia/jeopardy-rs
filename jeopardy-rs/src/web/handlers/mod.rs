@@ -193,14 +193,9 @@ pub mod test_util {
         state: &JeopardyServerStateGeneric<M, C>,
         lobby_name: &str,
     ) {
-        let manager_wg = state.manager().read().await;
-        let lobby = manager_wg.get(lobby_name).unwrap().lobby();
-        lobby
-            .shutdown()
-            .await
-            .unwrap() // shutdown
-            .await // wait until shut down
-            .unwrap();
+        let manager = state.manager().read().await;
+        let lobby = manager.get(lobby_name).unwrap().lobby();
+        lobby.shutdown().await.unwrap(); // shutdown
         assert!(lobby.is_shutdown());
     }
 
@@ -221,5 +216,12 @@ pub mod test_util {
             .has_player(player_id)
             .await
             .unwrap()
+    }
+
+    pub async fn lobby_exists<M: ManagerGeneric, C: CredsValidatorGeneric>(
+        state: &JeopardyServerStateGeneric<M, C>,
+        lobby_id: &str,
+    ) -> bool {
+        state.manager().read().await.has(lobby_id).unwrap()
     }
 }

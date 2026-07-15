@@ -79,9 +79,9 @@ pub async fn delete_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
         lobby_password,
         host_password,
     } = request;
-    let manager_wg = state.manager().write().await;
-    let entry = match manager_wg.get(&lobby_id) {
-        Ok(lobby) => lobby,
+    let manager = state.manager().write().await;
+    let entry = match manager.get(&lobby_id) {
+        Ok(entry) => entry,
         Err(e) => match e {
             ManagerError::EntryNotFound(_) => {
                 tracing::warn!("Requested lobby not found. Possibly already deleted.");
@@ -150,7 +150,7 @@ pub async fn delete_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
         },
     }
 
-    if let Err(e) = shutdown_lobby_and_delete_no_auth(manager_wg, &lobby_id).await {
+    if let Err(e) = shutdown_lobby_and_delete_no_auth(manager, &lobby_id).await {
         // remove can only fail if the id was not found
         // and since we pre-check, that means something else happened
         tracing::error!("Failed to invoke manager to delete lobby: {e}");
@@ -231,17 +231,13 @@ async fn shutdown_lobby_auth(
 // however, the function is already unit tested in `stagecrew`
 // and type signatures already guarantee that we handle this. so it's ok
 pub(super) async fn shutdown_lobby_and_delete_no_auth<M: ManagerGeneric>(
-    mut manager_wg: RwLockWriteGuard<'_, M>,
+    mut manager: RwLockWriteGuard<'_, M>,
     lobby_id: &str,
 ) -> Result<PasswordProtectedLobby<Jeopardy>, ManagerError> {
-    let entry = manager_wg.get(lobby_id)?;
+    let entry = manager.get(lobby_id)?;
     match entry.lobby().shutdown().await {
-        Ok(shutdown_handle) => {
-            if shutdown_handle.await.is_ok() {
-                tracing::info!("Lobby successfully shut down");
-            } else {
-                tracing::error!("Failed to wait for lobby shutdown. Possibly already shut down");
-            }
+        Ok(_) => {
+            tracing::info!("Lobby successfully shut down");
         }
         Err(e) => match e {
             LobbyError::ActorShutdown => {
@@ -256,7 +252,7 @@ pub(super) async fn shutdown_lobby_and_delete_no_auth<M: ManagerGeneric>(
             }
         },
     };
-    manager_wg.remove(lobby_id)
+    manager.remove(lobby_id)
 }
 
 #[cfg(test)]

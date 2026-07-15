@@ -120,7 +120,7 @@ pub async fn create_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
     let new_lobby = Lobby::new(
         new_game,
         PlayerMap::new(),
-        state.config().player_channel_buffer_size,
+        state.config().lobby_channel_buffer_size,
     );
     let lobby_entry =
         PasswordProtectedLobby::new(lobby_name.clone(), lobby_password.clone(), new_lobby);
@@ -177,7 +177,8 @@ mod create_lobby_tests {
     use crate::{
         server::TestDefault,
         web::handlers::test_util::{
-            new_test_manager_server_state, new_test_server_state, new_test_server_state_with_player,
+            lobby_exists, new_test_manager_server_state, new_test_server_state,
+            new_test_server_state_with_player,
         },
     };
     use stagecrew::manager::Manager;
@@ -241,13 +242,7 @@ mod create_lobby_tests {
                     ..
                 })
             ));
-            let lobby_exists = state
-                .manager()
-                .write()
-                .await
-                .has(&valid_lobby_name)
-                .unwrap();
-            assert_eq!(false, lobby_exists); // lobby was not created
+            assert_eq!(false, lobby_exists(&state, &valid_lobby_name).await); // lobby was not created
         }
     }
 
@@ -255,14 +250,14 @@ mod create_lobby_tests {
     async fn GIVEN_invalid_jeopardy_config_WHEN_create_lobby_THEN_error() {
         // GIVEN
         let state = new_test_server_state(None).await;
-        let lobby_name = "lobby_name".to_string();
+        let lobby_name = "lobby_name";
 
         // WHEN
         let (status_code, response) = super::create_lobby(
             State(state.clone()),
             Extension(Uuid::new_v4()),
             Json(CreateLobbyRequest {
-                lobby_name: lobby_name.clone(),
+                lobby_name: lobby_name.to_string(),
                 lobby_password: "lobby_password".to_string(),
                 host_password: "host_password".to_string(),
                 config: JeopardyConfig::invalid_default(), // test function (not in actual API)
@@ -279,8 +274,7 @@ mod create_lobby_tests {
                 ..
             })
         ));
-        let lobby_exists = state.manager().read().await.has(&lobby_name).unwrap();
-        assert_eq!(false, lobby_exists); // was not created
+        assert_eq!(false, lobby_exists(&state, lobby_name).await); // was not created
     }
 
     #[tokio::test]
@@ -325,14 +319,14 @@ mod create_lobby_tests {
         // GIVEN
         let state = new_test_manager_server_state(None).await;
         state.manager().write().await.set_always_fail(); // prevent lobby lookup from passing
-        let lobby_name = "lobby_name".to_string();
+        let lobby_name = "lobby_name";
 
         // WHEN
         let (status_code, result) = super::create_lobby(
             State(state.clone()),
             Extension(Uuid::new_v4()),
             Json(CreateLobbyRequest {
-                lobby_name: lobby_name.clone(),
+                lobby_name: lobby_name.to_string(),
                 lobby_password: "lobby_password".to_string(),
                 host_password: "host_password".to_string(),
                 config: JeopardyConfig::test_default(),
@@ -350,8 +344,7 @@ mod create_lobby_tests {
             })
         ));
         state.manager().write().await.set_never_fail();
-        let lobby_exists = state.manager().read().await.has(&lobby_name).unwrap();
-        assert_eq!(false, lobby_exists); // was not created
+        assert_eq!(false, lobby_exists(&state, lobby_name).await); // was not created
     }
 
     #[tokio::test]
@@ -359,14 +352,14 @@ mod create_lobby_tests {
         // GIVEN
         let state = new_test_manager_server_state(None).await;
         state.manager().write().await.set_fail_after_n(1); // let the lobby lookup pass but let the creation fail
-        let lobby_name = "lobby_name".to_string();
+        let lobby_name = "lobby_name";
 
         // WHEN
         let (status_code, result) = super::create_lobby(
             State(state.clone()),
             Extension(Uuid::new_v4()),
             Json(CreateLobbyRequest {
-                lobby_name: lobby_name.clone(),
+                lobby_name: lobby_name.to_string(),
                 lobby_password: "lobby_password".to_string(),
                 host_password: "host_password".to_string(),
                 config: JeopardyConfig::test_default(),
@@ -384,8 +377,7 @@ mod create_lobby_tests {
             })
         ));
         state.manager().write().await.set_never_fail();
-        let lobby_exists = state.manager().read().await.has(&lobby_name).unwrap();
-        assert_eq!(false, lobby_exists); // was not created
+        assert_eq!(false, lobby_exists(&state, lobby_name).await); // was not created
     }
 
     // grace period cleanup tests
@@ -393,9 +385,9 @@ mod create_lobby_tests {
     #[tokio::test]
     async fn GIVEN_empty_lobby_WHEN_grace_period_cleanup_THEN_ok() {
         // GIVEN
-        let lobby_name = "lobby_name".to_string();
+        let lobby_name = "lobby_name";
         let state = new_test_server_state(Some(CreateLobbyRequest {
-            lobby_name: lobby_name.clone(),
+            lobby_name: lobby_name.to_string(),
             lobby_password: "lobby_password".to_string(),
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
@@ -408,16 +400,15 @@ mod create_lobby_tests {
         sleep(grace_period).await;
 
         // THEN
-        let lobby_exists = state.manager().read().await.has(&lobby_name).unwrap();
-        assert_eq!(false, lobby_exists); // gone bc it was empty
+        assert_eq!(false, lobby_exists(&state, lobby_name).await); // gone bc it was empty
     }
 
     #[tokio::test]
     async fn GIVEN_nonempty_lobby_WHEN_grace_period_cleanup_THEN_ok() {
         // GIVEN
-        let lobby_name = "lobby_name".to_string();
+        let lobby_name = "lobby_name";
         let request = CreateLobbyRequest {
-            lobby_name: lobby_name.clone(),
+            lobby_name: lobby_name.to_string(),
             lobby_password: "lobby_password".to_string(),
             host_password: "host_password".to_string(),
             config: JeopardyConfig::test_default(),
@@ -430,7 +421,6 @@ mod create_lobby_tests {
         sleep(after_grace_period).await;
 
         // THEN
-        let lobby_exists = state.manager().read().await.has(&lobby_name).unwrap();
-        assert!(lobby_exists);
+        assert!(lobby_exists(&state, lobby_name).await);
     }
 }

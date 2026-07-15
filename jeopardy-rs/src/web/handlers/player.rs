@@ -26,9 +26,9 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginCredentials {
-    lobby_id: String,
-    lobby_password: String,
-    username: String,
+    pub lobby_id: String,
+    pub lobby_password: String,
+    pub username: String,
 }
 
 fn is_valid_login_request(
@@ -110,7 +110,7 @@ pub enum UserError {
 
 #[derive(Debug, Error)]
 pub enum InternalError {
-    #[error("Inactive lobby ID: {0} still present in manager")]
+    #[error("Inactive lobby ID: '{0}' still present in manager")]
     InactiveLobby(String),
     #[error("Attempted to perform an operation that requires the player to be logged in.")]
     NotLoggedIn,
@@ -184,11 +184,11 @@ where
     }
 
     // NOTE: this function consumes the connection
-    pub async fn handle_internal_error(self, e: InternalError) -> Result<(), InternalError> {
+    pub async fn handle_internal_error(self, _e: InternalError) -> Result<(), InternalError> {
         self.json_ws
             .disconnect(Some(ErrorReason {
                 internal_error: true,
-                reason: e.to_string(),
+                reason: "Internal Server Error".to_string(),
             }))
             .await
             .map_err(|e| {
@@ -227,8 +227,8 @@ where
         let _entered = join_span.enter();
 
         // get lobby
-        let manager_wg = self.state.manager().read().await;
-        let entry = manager_wg.get(lobby_id).map_err(|e| match e {
+        let manager = self.state.manager().read().await;
+        let entry = manager.get(lobby_id).map_err(|e| match e {
             ManagerError::EntryNotFound(_) => {
                 tracing::warn!("Cannot log in to lobby that does not exist");
                 PlayerHandlerError::User(UserError::Login(LoginError::LobbyNotFound))
@@ -302,7 +302,7 @@ where
         } = self.creds.take().ok_or(InternalError::NotLoggedIn)?;
         let leave_span =
             tracing::info_span!("leave_lobby", lobby_id = lobby_id, username = username);
-        let _enter = leave_span.enter();
+        let _entered = leave_span.enter();
 
         // remove player from lobby
         let player = lobby.remove_player(&username).await.map_err(|e| match e {
@@ -333,8 +333,8 @@ where
         tracing::info!("Current player count: {player_count}");
         if player_count == 0 {
             tracing::info!("Lobby is empty, attempting to delete...");
-            let manager_wg = self.state.manager().write().await;
-            shutdown_lobby_and_delete_no_auth(manager_wg, &lobby_id) // logs its operation
+            let manager = self.state.manager().write().await;
+            shutdown_lobby_and_delete_no_auth(manager, &lobby_id) // logs its operation
                 .await
                 .map_err(|e| InternalError::Dependency(e.into()))?;
             tracing::info!("Successfully deleted empty lobby");
@@ -360,7 +360,7 @@ where
         timeout: Duration,
     ) -> Result<mpsc::Receiver<JeopardyPlayerEvent>, PlayerHandlerError> {
         let login_span = tracing::info_span!("login", max_attempts=max_attempts, timeout=?timeout);
-        let _enter = login_span.enter();
+        let _entered = login_span.enter();
         for attempt in 1..=max_attempts {
             // read request from frontend
             let request = self.read_request_with_timeout(timeout).await?;
@@ -394,7 +394,7 @@ where
                 },
             }
         }
-        tracing::warn!("Exceeded login attempt limit: {max_attempts}");
+        tracing::warn!("Exceeded login attempt limit");
         Err(PlayerHandlerError::User(UserError::Login(
             LoginError::ExceededAttemptLimit,
         )))
@@ -525,7 +525,7 @@ where
 #[allow(non_snake_case)]
 mod player_conn_tests {
     use stagecrew::{
-        conn::json_conn_test_constructs::{MockTextTransport, new_mock_json_conn},
+        conn::json_conn_test_constructs::{MockTextTransport, new_test_json_conn},
         manager::{
             Manager, MapManager, PasswordProtectedLobby, test_manager_constructs::TestManager,
         },
@@ -572,7 +572,7 @@ mod player_conn_tests {
         mpsc::Receiver<String>,
     ) {
         let (mock_json_conn, input_sender, output_receiver) =
-            new_mock_json_conn(fail_during_read_text, buffer_size);
+            new_test_json_conn(fail_during_read_text, buffer_size);
         let player_conn = PlayerConn::new(state, mock_json_conn);
         (player_conn, input_sender, output_receiver)
     }

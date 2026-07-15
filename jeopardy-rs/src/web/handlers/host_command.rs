@@ -96,8 +96,8 @@ pub async fn handle_host_command<M: ManagerGeneric, C: CredsValidatorGeneric>(
         lobby_password,
         command,
     } = request;
-    let manager_rg = state.manager().read().await;
-    let lobby = match manager_rg.get(&lobby_id) {
+    let manager = state.manager().read().await;
+    let lobby = match manager.get(&lobby_id) {
         Ok(lobby) => lobby,
         Err(e) => match e {
             ManagerError::EntryNotFound(_) => {
@@ -143,7 +143,7 @@ pub async fn handle_host_command<M: ManagerGeneric, C: CredsValidatorGeneric>(
     // Result<Result<>> because the call could fail
     // and then the inner is the response from the game
     let result = lobby.lobby().send_game_event_and_wait(command).await;
-    drop(manager_rg); // release read guard now that we've already sent our request to the lobby
+    drop(manager); // release read guard now that we've already sent our request to the lobby
     tracing::info!("Sent command to lobby");
 
     let response = match result {

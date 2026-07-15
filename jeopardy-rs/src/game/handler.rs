@@ -192,6 +192,7 @@ impl Jeopardy {
         players: &dyn ReadPlayerCollection<JeopardyPlayer>,
         player_id: String,
     ) -> Result<(), JeopardyError> {
+        // TODO: add timestamp to buzzer and make this error instead of no-op
         if let JeopardyDisplayEvent::TextCard { .. } = self.display {
             // if there is no question shown, buzzing just no-ops
             if !players.contains(&player_id) {

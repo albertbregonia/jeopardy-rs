@@ -28,6 +28,7 @@ pub struct ServerConfig {
     pub max_retry: usize,
     pub max_username_length: usize,
     pub player_channel_buffer_size: usize,
+    pub lobby_channel_buffer_size: usize,
     pub lobby_cleanup_grace_period: Duration,
 }
 
@@ -39,6 +40,7 @@ impl Default for ServerConfig {
             max_retry: 3,
             max_username_length: 32,
             player_channel_buffer_size: 128,
+            lobby_channel_buffer_size: 128,
             lobby_cleanup_grace_period: Duration::from_mins(5),
         }
     }
@@ -69,6 +71,7 @@ impl TestDefault for ServerConfig {
             max_retry: 3,
             max_username_length: 32,
             player_channel_buffer_size: 1,
+            lobby_channel_buffer_size: 1,
             lobby_cleanup_grace_period: Duration::from_secs(1),
         }
     }

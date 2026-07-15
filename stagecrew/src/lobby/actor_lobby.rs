@@ -20,10 +20,8 @@ enum Command<G: Game> {
 }
 
 pub struct Lobby<G: Game> {
-    // NOTE: due to the functionality of mpsc::Sender when every instance of mpsc::Sender is dropped,
-    // it will signal the mpsc::Receiver to drop. therefore in this case, if lobby_handle is dropped
-    // and there are no clones of it, the actor will be signaled to shutdown after processing its last queued message
-    // (no new messages will be queued)
+    // NOTE: if the one of the clones of this handle signal a shutdown,
+    // this handle will become invalidated as the receiving end will drop immediately
     lobby_handle: mpsc::Sender<Command<G>>,
 }
 
@@ -105,9 +103,9 @@ impl<G: Game> Lobby<G> {
             .await
     }
 
-    pub async fn shutdown(&self) -> Result<Reply<()>, LobbyError> {
-        let reply = self.send(|responder| Command::Shutdown(responder)).await?;
-        Ok(reply)
+    pub async fn shutdown(&self) -> Result<(), LobbyError> {
+        self.send_and_wait(|responder| Command::Shutdown(responder))
+            .await
     }
 
     pub fn is_shutdown(&self) -> bool {
@@ -140,7 +138,6 @@ impl<G: Game> ActorLobby<G> {
     }
 
     pub async fn run_game_loop(mut self) {
-        let mut shutdown_callback = None;
         while let Some(event) = self.subscriber.recv().await {
             match event {
                 Command::HasPlayer(responder, id) => {
@@ -157,19 +154,14 @@ impl<G: Game> ActorLobby<G> {
                     G::handle_reply(responder, self.game.handle_event(&mut self.players, event));
                 }
                 Command::Shutdown(responder) => {
-                    // this can close with more shutdown messages in the queue
-                    // therefore, respond only to the first message
-                    // others will simply error out with a recv error
-                    // when their responder gets dropped by this function
-                    if !self.subscriber.is_closed() {
-                        self.subscriber.close();
-                        shutdown_callback = Some(responder);
-                    }
+                    // proper operation of an mpsc::channel is to process all messages and then shutdown.
+                    // however, if we receive a shutdown signal, this should always exit and invalidate senders.
+                    // this is because we don't want lobby handle clones to prevent shutdown
+                    self.subscriber.close();
+                    G::handle_reply(responder, ());
+                    break;
                 }
             }
-        }
-        if let Some(responder) = shutdown_callback {
-            let _ = responder.send(());
         }
     }
 
@@ -261,45 +253,17 @@ mod lobby_tests {
         assert_eq!(false, lobby.is_shutdown());
 
         // WHEN
-        let handle = lobby.shutdown().await.unwrap();
+        lobby.shutdown().await.unwrap();
 
         // THEN
-        handle.await.unwrap(); // wait until actually shut down
         assert!(lobby.is_shutdown());
-    }
-
-    #[tokio::test]
-    async fn GIVEN_already_shutdown_lobby_WHEN_shutdown_THEN_error() {
-        // when 2 shutdowns are queued, both are successfully handled but
-        // only the first one is acknowledged and given a valid handle to wait on for true shutdown.
-        // any other recv handles with RecvError when their responder oneshot eventually gets dropped
-
-        // it's better to rely on shutdown although it has been documented that
-        // since Lobby{} holds the only publisher handle to the actor (and is private and cannot be cloned)
-        // dropping Lobby and the publisher handle closes the subscriber, signaling the actor to shutdown
-
-        // GIVEN
-        let lobby = Lobby::new(TestGame::default(), PlayerMap::new(), 2);
-
-        // WHEN
-        let handle1 = lobby.shutdown().await.unwrap();
-        let handle2 = lobby.shutdown().await.unwrap();
-
-        // THEN
-        handle1.await.unwrap();
-        assert!(lobby.is_shutdown());
-        assert!(matches!(
-            handle2.await.map_err(|e| e.into()),
-            Err(LobbyError::ActorShutdown)
-        ));
     }
 
     #[tokio::test] // this is an all encompassing negative test as they all have to pass through the same actor handler
     async fn GIVEN_already_shutdown_lobby_WHEN_send_event_THEN_error() {
         // GIVEN
         let lobby = Lobby::default();
-        let shutdown_handle = lobby.shutdown().await.unwrap();
-        shutdown_handle.await.unwrap(); // wait until shut down
+        lobby.shutdown().await.unwrap();
         assert!(lobby.is_shutdown());
 
         // WHEN - all of these should fail bc the actor is shut down
@@ -496,7 +460,7 @@ mod lobby_tests {
         let clone = lobby.clone();
 
         // WHEN
-        lobby.shutdown().await.unwrap().await.unwrap();
+        lobby.shutdown().await.unwrap();
 
         // THEN
         assert!(clone.is_shutdown()); // lobby clones point to the underlying same actor
