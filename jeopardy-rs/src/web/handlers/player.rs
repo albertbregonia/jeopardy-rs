@@ -21,14 +21,23 @@ use crate::{
         player::{JeopardyPlayer, JeopardyPlayerEvent},
     },
     server::{CredsValidatorGeneric, JeopardyServerStateGeneric, ManagerGeneric},
-    web::handlers::{delete_lobby::shutdown_lobby_and_delete_no_auth, serialize_result},
+    web::handlers::serialize_result,
 };
 
+/// Helper struct to encapsulate creds for a login request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginCredentials {
     pub lobby_id: String,
     pub lobby_password: String,
     pub username: String,
+}
+
+/// Helper struct to encapsulate former player data after leaving a lobby.
+/// Useful for updating persistent player stats and handling lobby cleanup
+pub struct LeaveCredentials {
+    pub player: JeopardyPlayer,
+    pub former_creds: LoginCredentials,
+    pub lobby_ref: Lobby<Jeopardy>,
 }
 
 fn is_valid_login_request(
@@ -216,7 +225,7 @@ where
     /// returns the mpsc::Receiver handle to receive messages from the lobby
     pub async fn join_lobby(
         &mut self,
-        creds: LoginCredentials,
+        mut creds: LoginCredentials,
     ) -> Result<mpsc::Receiver<JeopardyPlayerEvent>, PlayerHandlerError> {
         let LoginCredentials {
             lobby_id,
@@ -282,6 +291,7 @@ where
             })?;
 
         tracing::info!("Successful login for '{username}' to '{lobby_id}'.");
+        creds.lobby_password = "".to_string(); // delete password, we don't want to store it
         self.lobby = Some(entry.lobby().clone()); // clone the handle
         self.creds = Some(creds);
         Ok(receiver)
@@ -295,53 +305,39 @@ where
     /// possible failures:
     /// - InternalError::UserNotLoggedIn, attempted to leave a lobby without a previous `join_lobby(..)` call (self.creds == None)
     /// - any LobbyError other than ActorShutdown after calling remove_player()
-    pub async fn leave_lobby(&mut self) -> Result<JeopardyPlayer, InternalError> {
-        let lobby = self.lobby.take().ok_or(InternalError::NotLoggedIn)?;
-        let LoginCredentials {
-            lobby_id, username, ..
-        } = self.creds.take().ok_or(InternalError::NotLoggedIn)?;
-        let leave_span =
-            tracing::info_span!("leave_lobby", lobby_id = lobby_id, username = username);
+    pub async fn leave_lobby(&mut self) -> Result<LeaveCredentials, InternalError> {
+        let lobby_ref = self.lobby.take().ok_or(InternalError::NotLoggedIn)?;
+        let former_creds = self.creds.take().ok_or(InternalError::NotLoggedIn)?;
+        let leave_span = tracing::info_span!(
+            "leave_lobby",
+            lobby_id = former_creds.lobby_id,
+            username = former_creds.username
+        );
         let _entered = leave_span.enter();
 
         // remove player from lobby
-        let player = lobby.remove_player(&username).await.map_err(|e| match e {
-            LobbyError::ActorShutdown => {
-                tracing::error!("Failed to remove player from lobby. Lobby is already shut down");
-                InternalError::InactiveLobby(lobby_id.clone())
-            }
-            other => {
-                tracing::error!("Unexpected error during remove player: {other}");
-                InternalError::UnexpectedResponse(other.into())
-            }
-        })?;
-        tracing::info!("Successfully removed player from lobby");
-
-        // handle empty lobby
-        let player_count = lobby.player_count().await.map_err(|e| match e {
-            LobbyError::ActorShutdown => {
-                // can't test this but positive case tested
-                tracing::error!("Failed to check player count. Lobby is already shut down");
-                InternalError::InactiveLobby(lobby_id.clone())
-            }
-            other => {
-                // can't test this but that's the point
-                tracing::error!("Unexpected error during player count check");
-                InternalError::UnexpectedResponse(other.into())
-            }
-        })?;
-        tracing::info!("Current player count: {player_count}");
-        if player_count == 0 {
-            tracing::info!("Lobby is empty, attempting to delete...");
-            let manager = self.state.manager().write().await;
-            shutdown_lobby_and_delete_no_auth(manager, &lobby_id) // logs its operation
-                .await
-                .map_err(|e| InternalError::Dependency(e.into()))?;
-            tracing::info!("Successfully deleted empty lobby");
-        }
-
+        let player = lobby_ref
+            .remove_player(&former_creds.username)
+            .await
+            .map_err(|e| match e {
+                LobbyError::ActorShutdown => {
+                    tracing::error!(
+                        "Failed to remove player from lobby. Lobby is already shut down"
+                    );
+                    InternalError::InactiveLobby(former_creds.lobby_id.clone())
+                }
+                other => {
+                    // not tested but expected
+                    tracing::error!("Unexpected error during remove player: {other}");
+                    InternalError::UnexpectedResponse(other.into())
+                }
+            })?;
         tracing::info!("Successful leave lobby");
-        Ok(player)
+        Ok(LeaveCredentials {
+            player,
+            former_creds,
+            lobby_ref,
+        })
     }
 
     /// attempts to call `join_lobby(..)` `max_attempts` times
@@ -491,7 +487,10 @@ where
                                 return Err(PlayerHandlerError::Internal(InternalError::Dependency(anyhow!(error_msg))));
                             }
                         }
-                        None => return Ok(false), // clean ws disconnect
+                        None => {
+                            tracing::info!("Lost connection to JsonConn");
+                            return Ok(false);
+                        }
                     },
                     // internal send to player handler
                     result = event_receiver.recv() => match result {
@@ -507,7 +506,10 @@ where
                             self.send_response(response).await?;
                             tracing::info!("Game event broadcasted");
                         }
-                        None => return Ok(false), // clean ws disconnect
+                        None => {
+                            tracing::info!("Lost connection to lobby.");
+                            return Ok(false); // clean ws disconnect
+                        }
                     }
                 }
                 Ok(true)
@@ -526,9 +528,7 @@ where
 mod player_conn_tests {
     use stagecrew::{
         conn::json_conn_test_constructs::{MockTextTransport, new_test_json_conn},
-        manager::{
-            Manager, MapManager, PasswordProtectedLobby, test_manager_constructs::TestManager,
-        },
+        manager::{MapManager, PasswordProtectedLobby, test_manager_constructs::TestManager},
         player::Player,
     };
     use std::assert_matches;
@@ -549,8 +549,8 @@ mod player_conn_tests {
         web::handlers::{
             create_lobby::CreateLobbyRequest,
             player::{
-                InternalError, LoginCredentials, LoginError, PlayerConn, PlayerHandlerError,
-                PlayerRequest, PlayerResponse, UserError,
+                InternalError, LeaveCredentials, LoginCredentials, LoginError, PlayerConn,
+                PlayerHandlerError, PlayerRequest, PlayerResponse, UserError,
             },
             test_util::{
                 TestManagerServerState, lobby_has_player, new_test_manager_server_state,
@@ -858,7 +858,7 @@ mod player_conn_tests {
         // cached creds match
         let player_creds = player_conn.creds.clone().unwrap();
         assert_eq!(player_creds.lobby_id, login_request.lobby_id);
-        assert_eq!(player_creds.lobby_password, login_request.lobby_password);
+        assert_eq!(player_creds.lobby_password, ""); // we do not save lobby password
         assert_eq!(player_creds.username, login_request.username);
         assert!(player_conn.lobby.is_some());
         (player_conn, input_sender, output_receiver)
@@ -1113,37 +1113,24 @@ mod player_conn_tests {
         let (player_conn, _, _) = &mut player_conns[0];
 
         // WHEN
-        let player = player_conn.leave_lobby().await.unwrap();
+        let LeaveCredentials {
+            player,
+            former_creds,
+            ..
+        } = player_conn.leave_lobby().await.unwrap();
 
         // THEN
         let expected_player_id = &usernames[0];
         assert_eq!(expected_player_id, player.id()); // returned player is correct
+        assert_matches!( // returned creds are correct
+            former_creds,
+            LoginCredentials { lobby_id, lobby_password, username }
+                if lobby_id == lobby_name && username == usernames[0] && lobby_password == ""
+        );
+        // we cannot test lobby ref bc it is a clone of the underlying mpsc
 
         let has_player = lobby_has_player(&state, lobby_name, expected_player_id).await;
         assert_eq!(false, has_player); // lobby still exists bc player_count > 0
-
-        assert!(player_conn.lobby.is_none());
-        assert!(player_conn.creds.is_none());
-    }
-
-    #[tokio::test]
-    async fn GIVEN_last_player_WHEN_leave_lobby_THEN_ok() {
-        // GIVEN
-        let usernames = vec!["player1".to_string()];
-        let lobby_name = "lobby_name";
-        let (state, mut player_conns) =
-            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
-        let (player_conn, _, _) = &mut player_conns[0];
-
-        // WHEN
-        let player = player_conn.leave_lobby().await.unwrap();
-
-        // THEN
-        let expected_player_id = &usernames[0];
-        assert_eq!(expected_player_id, player.id()); // returned player is correct
-
-        let has_lobby = state.manager().read().await.has(lobby_name).unwrap();
-        assert_eq!(false, has_lobby); // lobby was deleted bc empty
 
         assert!(player_conn.lobby.is_none());
         assert!(player_conn.creds.is_none());
@@ -1166,32 +1153,14 @@ mod player_conn_tests {
         let result_no_creds_cached = player_conn.leave_lobby().await;
 
         // THEN
-        assert_matches!(result_no_lobby_cached, Err(InternalError::NotLoggedIn));
-        assert_matches!(result_no_creds_cached, Err(InternalError::NotLoggedIn));
-    }
-
-    #[tokio::test]
-    async fn GIVEN_failing_manager_WHEN_leave_lobby_THEN_error() {
-        let username = "player1";
-        let lobby_name = "lobby_name";
-        let (state, mut player_conn, _, _) =
-            new_test_manager_server_state_with_logged_in_player(username, lobby_name).await;
-
-        // preconditions
-        state.manager().write().await.set_always_fail();
-
-        // WHEN
-        let result = player_conn.leave_lobby().await;
-
-        // THEN
-        assert_matches!(result, Err(InternalError::Dependency(..)));
-        // if leaving fails, there are only 2 cases:
-        // - lobby/player is already gone, therefore this call can be safely ignored
-        // - if we get an unexpected error, this bars us from cleanup and allows the lobby to continue
-        //   (as send_background ignores the error). however, this is improper and is essentially a memory leak
-        //   TODO: have stagecrew lobby remove player upon error
-        assert!(player_conn.creds.is_none());
-        assert!(player_conn.lobby.is_none());
+        assert!(matches!(
+            result_no_lobby_cached,
+            Err(InternalError::NotLoggedIn)
+        ));
+        assert!(matches!(
+            result_no_creds_cached,
+            Err(InternalError::NotLoggedIn)
+        ));
     }
 
     #[tokio::test]
@@ -1211,7 +1180,7 @@ mod player_conn_tests {
         let result = player_conn.leave_lobby().await;
 
         // THEN
-        assert_matches!(result, Err(InternalError::InactiveLobby(..)));
+        assert!(matches!(result, Err(InternalError::InactiveLobby(..))));
         assert!(player_conn.lobby.is_none());
         assert!(player_conn.creds.is_none());
     }
