@@ -271,7 +271,7 @@ mod lobby_tests {
         // to be exhaustive, we test that every command fails
         // despite them all sharing the same helper
         let shutdown_result = lobby.shutdown().await;
-        let add_player_result = lobby.add_player("", TestPlayer("".to_string())).await;
+        let add_player_result = lobby.add_player("", TestPlayer(String::new())).await;
         let has_player_result = lobby.has_player("").await;
         let remove_player_result = lobby.remove_player("").await;
         let player_count_result = lobby.player_count().await;

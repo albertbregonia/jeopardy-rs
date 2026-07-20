@@ -205,17 +205,17 @@ mod create_lobby_tests {
         for i in 0..3 {
             // switch which field has the invalid format
             let lobby_name = if i == 0 {
-                "".to_string()
+                String::new()
             } else {
                 valid_lobby_name.clone()
             };
             let lobby_password = if i == 1 {
-                "".to_string()
+                String::new()
             } else {
                 valid_lobby_password.clone()
             };
             let host_password = if i == 2 {
-                "".to_string()
+                String::new()
             } else {
                 valid_host_password.clone()
             };

@@ -84,7 +84,7 @@ mod nonzero_ascii_tests {
         let validator = NonZeroAsciiValidator::new(TEST_MAX_NAME_LENGTH);
         for i in 0..5 {
             let test_str = match i {
-                0 => "".to_string(),                       // empty string
+                0 => String::new(),                        // empty string
                 1 => "a".repeat(TEST_MAX_NAME_LENGTH + 1), // > max length
                 2 => "💀".to_string(),                     // non ascii
                 3 => "\t".to_string(),                     // non-visible ascii

@@ -69,7 +69,7 @@ mod password_lobby_tests {
         // ensure we can get access to the underlying lobby
         // lowk a "test for testing"
         // but we're testing the concrete type matches the trait expectation
-        let entry = PasswordProtectedLobby::with_test_game("1".to_string(), "".to_string());
+        let entry = PasswordProtectedLobby::with_test_game("1".to_string(), String::new());
         assert_eq!(false, entry.lobby().is_shutdown());
     }
 }

@@ -265,7 +265,7 @@ where
         // NOTE: lowk wasteful because the call may fail but since the player structs are cheap this is fine
         let buffer_size = self.state.config().player_channel_buffer_size;
         let (sender, receiver) = mpsc::channel(buffer_size);
-        let player = JeopardyPlayer::new(username.clone(), sender);
+        let player = JeopardyPlayer::new(username.clone(), 0, sender);
         tracing::info!("Successfully created player object");
 
         // add to lobby
@@ -292,7 +292,7 @@ where
             })?;
 
         tracing::info!("Successful login for '{username}' to '{lobby_id}'.");
-        creds.lobby_password = "".to_string(); // delete password, we don't want to store it
+        creds.lobby_password = String::new(); // delete password, we don't want to store it
         self.lobby = Some(entry.lobby().clone()); // clone the handle
         self.creds = Some(creds);
         Ok(receiver)
@@ -1153,9 +1153,9 @@ mod player_conn_tests {
 
         // WHEN
         player_conn.creds = Some(LoginCredentials {
-            lobby_id: "".to_string(),
-            lobby_password: "".to_string(),
-            username: "".to_string(),
+            lobby_id: String::new(),
+            lobby_password: String::new(),
+            username: String::new(),
         });
         let result_no_creds_cached = player_conn.leave_lobby().await;
 
@@ -1267,17 +1267,17 @@ mod player_conn_tests {
         for i in 0..3 {
             // switch which field has the invalid format
             let lobby_id = if i == 0 {
-                "".to_string()
+                String::new()
             } else {
                 request.lobby_name.clone()
             };
             let lobby_password = if i == 1 {
-                "".to_string()
+                String::new()
             } else {
                 request.lobby_password.clone()
             };
             let username = if i == 2 {
-                "".to_string()
+                String::new()
             } else {
                 "username".to_string()
             };

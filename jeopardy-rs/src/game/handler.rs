@@ -511,8 +511,7 @@ mod handler_tests {
         for i in 0..n {
             let (tx, _) = mpsc::channel(1);
             let id = i.to_string();
-            let mut player = JeopardyPlayer::new(id.clone(), tx);
-            player.points = i as i32;
+            let player = JeopardyPlayer::new(id.clone(), i as i32, tx);
             players.add(id, player);
         }
 
@@ -537,7 +536,7 @@ mod handler_tests {
         for i in 1..=n {
             let (tx, rx) = mpsc::channel(1);
             let id = i.to_string();
-            let player = JeopardyPlayer::new(id.clone(), tx);
+            let player = JeopardyPlayer::new(id.clone(), 0, tx);
             players.add(id, player);
             receivers.push(rx);
         }
@@ -549,8 +548,8 @@ mod handler_tests {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
         jeopardy.display = JeopardyDisplayEvent::TextCard {
-            title: "".to_string(), // ensure buzzing doesn't no-op
-            content: "".to_string(),
+            title: String::new(), // ensure buzzing doesn't no-op
+            content: String::new(),
         };
         let n = 10;
         let (players, _) = new_test_jeopardy_player_map(n);
@@ -597,8 +596,8 @@ mod handler_tests {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
         jeopardy.display = JeopardyDisplayEvent::TextCard {
-            title: "".to_string(), // ensure buzzing doesn't no-op
-            content: "".to_string(),
+            title: String::new(), // ensure buzzing doesn't no-op
+            content: String::new(),
         };
         let n = 10;
         let (players, _) = new_test_jeopardy_player_map(n);
@@ -621,8 +620,8 @@ mod handler_tests {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
         jeopardy.display = JeopardyDisplayEvent::TextCard {
-            title: "".to_string(), // ensure buzzing doesn't no-op
-            content: "".to_string(),
+            title: String::new(), // ensure buzzing doesn't no-op
+            content: String::new(),
         };
         let n = 10;
         let (players, _) = new_test_jeopardy_player_map(n);
@@ -780,7 +779,7 @@ mod handler_tests {
     {
         let mut players = PlayerMap::new();
         let (tx, rx) = mpsc::channel(1);
-        let mut player = JeopardyPlayer::new(player_id.clone(), tx);
+        let mut player = JeopardyPlayer::new(player_id.clone(), 0, tx);
         player_setup(&mut player);
         players.add(player_id.clone(), player);
         (players, rx)
@@ -1529,7 +1528,7 @@ mod handler_tests {
             PlayerCommand::GetScoreboard,
             PlayerCommand::Refresh,
             PlayerCommand::GetFreeResponse,
-            PlayerCommand::SetFreeResponse("".to_string()),
+            PlayerCommand::SetFreeResponse(String::new()),
             PlayerCommand::GetWager,
             PlayerCommand::SetWager(0),
         ];

@@ -72,7 +72,7 @@ mod final_jeopardy_tests {
     fn GIVEN_empty_hint_WHEN_new_THEN_error() {
         // GIVEN
         let question = Question::test_default();
-        let hint = "".to_string();
+        let hint = String::new();
 
         // WHEN - truly empty
         let result = FinalJeopardy::new(hint, question.clone());

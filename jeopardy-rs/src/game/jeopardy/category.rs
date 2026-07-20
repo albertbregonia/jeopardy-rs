@@ -109,7 +109,7 @@ mod category_tests {
     #[test]
     fn GIVEN_empty_category_name_WHEN_new_THEN_error() {
         // GIVEN
-        let name = "".to_string();
+        let name = String::new();
 
         // WHEN
         let category = Category::new(name, vec![BoardQuestion::test_default()]);

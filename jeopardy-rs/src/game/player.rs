@@ -44,11 +44,11 @@ impl Player for JeopardyPlayer {
 }
 
 impl JeopardyPlayer {
-    pub fn new(name: String, sender: mpsc::Sender<JeopardyPlayerEvent>) -> Self {
+    pub fn new(name: String, points: i32, sender: mpsc::Sender<JeopardyPlayerEvent>) -> Self {
         Self {
             name,
             wager: 0,
-            points: 0,
+            points,
             free_response: String::new(),
             sender,
         }
@@ -118,7 +118,7 @@ mod player_tests {
     fn new_jeopardy_player() -> (JeopardyPlayer, mpsc::Receiver<JeopardyPlayerEvent>) {
         let (sender, rx) = mpsc::channel(1);
         let name = "test".to_string();
-        let player = JeopardyPlayer::new(name.clone(), sender);
+        let player = JeopardyPlayer::new(name.clone(), 0, sender);
         assert_eq!(name, player.id());
         (player, rx)
     }

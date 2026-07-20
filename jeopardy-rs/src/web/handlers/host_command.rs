@@ -438,17 +438,17 @@ mod host_command_tests {
         for i in 0..3 {
             // switch which field has the invalid format
             let lobby_name = if i == 0 {
-                "".to_string()
+                String::new()
             } else {
                 create_lobby_request.lobby_name.clone()
             };
             let lobby_password = if i == 1 {
-                "".to_string()
+                String::new()
             } else {
                 create_lobby_request.lobby_password.clone()
             };
             let host_password = if i == 2 {
-                "".to_string()
+                String::new()
             } else {
                 create_lobby_request.host_password.clone()
             };
@@ -502,17 +502,17 @@ mod host_command_tests {
         for i in 0..3 {
             // switch which field has the invalid format
             let lobby_name = if i == 0 {
-                "".to_string()
+                String::new()
             } else {
                 create_lobby_request.lobby_name.clone()
             };
             let lobby_password = if i == 1 {
-                "".to_string()
+                String::new()
             } else {
                 create_lobby_request.lobby_password.clone()
             };
             let player_id = if i == 2 {
-                "".to_string()
+                String::new()
             } else {
                 player_id.to_string()
             };

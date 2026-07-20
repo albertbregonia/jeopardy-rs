@@ -38,7 +38,7 @@ impl Question {
     }
 
     pub fn redact(&mut self) {
-        self.answer = "".to_string();
+        self.answer = String::new();
     }
 }
 
@@ -97,7 +97,7 @@ mod question_tests {
     #[test]
     fn GIVEN_empty_question_WHEN_new_THEN_error() {
         // GIVEN
-        let content = "".to_string();
+        let content = String::new();
 
         // WHEN
         let result = Question::new(content, "test".to_string());
@@ -118,7 +118,7 @@ mod question_tests {
     #[test]
     fn GIVEN_empty_answer_WHEN_new_THEN_error() {
         // GIVEN
-        let answer = "".to_string();
+        let answer = String::new();
 
         // WHEN
         let result = Question::new("test".to_string(), answer);

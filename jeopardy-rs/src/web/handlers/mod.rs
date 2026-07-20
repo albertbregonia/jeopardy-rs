@@ -154,7 +154,7 @@ pub mod test_util {
         // GIVEN
         let state = new_test_server_state(Some(create_lobby.clone())).await;
         let (tx, rx) = mpsc::channel(1);
-        let player = JeopardyPlayer::new(player_id.to_string(), tx);
+        let player = JeopardyPlayer::new(player_id.to_string(), 0, tx);
         state
             .manager()
             .write()

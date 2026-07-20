@@ -167,7 +167,7 @@ mod test_manager_tests {
         assert!(matches!(
             manager.add(
                 "",
-                PasswordProtectedLobby::with_test_game("".to_string(), "".to_string())
+                PasswordProtectedLobby::with_test_game(String::new(), String::new())
             ),
             Err(ManagerError::Dependency(..))
         ));
@@ -191,7 +191,7 @@ mod test_manager_tests {
             assert!(matches!(
                 manager.add(
                     "",
-                    PasswordProtectedLobby::with_test_game("".to_string(), "".to_string())
+                    PasswordProtectedLobby::with_test_game(String::new(), String::new())
                 ),
                 Ok(())
             ));
@@ -217,7 +217,7 @@ mod test_manager_tests {
             assert!(matches!(
                 manager.add(
                     "",
-                    PasswordProtectedLobby::with_test_game("".to_string(), "".to_string())
+                    PasswordProtectedLobby::with_test_game(String::new(), String::new())
                 ),
                 Ok(())
             ));
@@ -236,7 +236,7 @@ mod test_manager_tests {
     async fn GIVEN_n_operations_WHEN_reset_THEN_ok() {
         // GIVEN
         let mut manager = TestManager::<PasswordProtectedLobby<TestGame>>::default();
-        let entry = PasswordProtectedLobby::with_test_game("".to_string(), "".to_string());
+        let entry = PasswordProtectedLobby::with_test_game(String::new(), String::new());
         manager.set_fail_after_n(1); // dummy value so we can add
         manager.add("", entry).unwrap(); // add dummy lobby for get(..) to run against 
         manager.reset();
