@@ -34,6 +34,7 @@ pub struct LoginCredentials {
 
 /// Helper struct to encapsulate former player data after leaving a lobby.
 /// Useful for updating persistent player stats and handling lobby cleanup
+#[derive(Debug)]
 pub struct LeaveCredentials {
     pub player: JeopardyPlayer,
     pub former_creds: LoginCredentials,
@@ -284,7 +285,7 @@ where
                     PlayerHandlerError::Internal(InternalError::InactiveLobby(lobby_id.clone()))
                 }
                 other => {
-                    // cant test this but that's the point
+                    // cant test this but that's expected
                     tracing::error!("Unexpected error during add player to lobby: {other}");
                     PlayerHandlerError::Internal(InternalError::UnexpectedResponse(other.into()))
                 }
@@ -433,7 +434,7 @@ where
                     })?;
                 }
                 other => {
-                    // can't test this but that's the point
+                    // can't test this but that's expected
                     let error_msg = format!(
                         "Received non-player response for during player command handling: {other:?}"
                     );
@@ -827,6 +828,7 @@ mod player_conn_tests {
         state: &JeopardyServerStateGeneric<M, C>,
         create_lobby_request: CreateLobbyRequest,
         username: &str,
+        player_channel_buffer_size: usize,
     ) -> (
         PlayerConn<MockTextTransport<PlayerRequest>, M, C>,
         mpsc::Sender<PlayerRequest>,
@@ -838,11 +840,8 @@ mod player_conn_tests {
     {
         // GIVEN
         let lobby_name = create_lobby_request.lobby_name.clone();
-        let (mut player_conn, input_sender, output_receiver) = new_test_player_conn(
-            state.clone(),
-            false,
-            state.config().player_channel_buffer_size,
-        );
+        let (mut player_conn, input_sender, output_receiver) =
+            new_test_player_conn(state.clone(), false, player_channel_buffer_size);
         let login_request = LoginCredentials {
             // derive login request from create lobby request
             lobby_id: create_lobby_request.lobby_name,
@@ -878,6 +877,7 @@ mod player_conn_tests {
 
     async fn new_test_server_state_with_logged_in_players(
         usernames: Vec<String>,
+        player_channel_buffer_size: usize,
         lobby_name: &str,
     ) -> (
         JeopardyServerState,
@@ -897,7 +897,13 @@ mod player_conn_tests {
         let state = new_test_server_state(Some(request.clone())).await;
         let mut player_conns = vec![];
         for username in usernames {
-            let player_conn = new_logged_in_player_conn(&state, request.clone(), &username).await;
+            let player_conn = new_logged_in_player_conn(
+                &state,
+                request.clone(),
+                &username,
+                player_channel_buffer_size,
+            )
+            .await;
             player_conns.push(player_conn);
         }
         (state, player_conns)
@@ -905,6 +911,7 @@ mod player_conn_tests {
 
     async fn new_test_manager_server_state_with_logged_in_player(
         username: &str,
+        player_channel_buffer_size: usize,
         lobby_name: &str,
     ) -> (
         TestManagerServerState,
@@ -920,7 +927,7 @@ mod player_conn_tests {
         };
         let state = new_test_manager_server_state(Some(request.clone())).await;
         let (player_conn, input_sender, output_receiver) =
-            new_logged_in_player_conn(&state, request, username).await;
+            new_logged_in_player_conn(&state, request, username, player_channel_buffer_size).await;
         (state, player_conn, input_sender, output_receiver)
     }
 
@@ -928,7 +935,7 @@ mod player_conn_tests {
 
     #[tokio::test]
     async fn GIVEN_valid_creds_WHEN_join_lobby_THEN_ok() {
-        new_test_server_state_with_logged_in_players(vec!["username".to_string()], "lobby_name")
+        new_test_server_state_with_logged_in_players(vec!["username".to_string()], 1, "lobby_name")
             .await;
     }
 
@@ -1109,7 +1116,7 @@ mod player_conn_tests {
         let usernames = vec!["player1".to_string(), "player2".to_string()];
         let lobby_name = "lobby_name";
         let (state, mut player_conns) =
-            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+            new_test_server_state_with_logged_in_players(usernames.clone(), 1, lobby_name).await;
         let (player_conn, _, _) = &mut player_conns[0];
 
         // WHEN
@@ -1153,14 +1160,8 @@ mod player_conn_tests {
         let result_no_creds_cached = player_conn.leave_lobby().await;
 
         // THEN
-        assert!(matches!(
-            result_no_lobby_cached,
-            Err(InternalError::NotLoggedIn)
-        ));
-        assert!(matches!(
-            result_no_creds_cached,
-            Err(InternalError::NotLoggedIn)
-        ));
+        assert_matches!(result_no_lobby_cached, Err(InternalError::NotLoggedIn));
+        assert_matches!(result_no_creds_cached, Err(InternalError::NotLoggedIn));
     }
 
     #[tokio::test]
@@ -1169,7 +1170,7 @@ mod player_conn_tests {
         let username = "player1";
         let lobby_name = "lobby_name";
         let (state, mut player_conns) =
-            new_test_server_state_with_logged_in_players(vec![username.to_string()], lobby_name)
+            new_test_server_state_with_logged_in_players(vec![username.to_string()], 1, lobby_name)
                 .await;
         let (player_conn, _, _) = &mut player_conns[0];
 
@@ -1180,7 +1181,7 @@ mod player_conn_tests {
         let result = player_conn.leave_lobby().await;
 
         // THEN
-        assert!(matches!(result, Err(InternalError::InactiveLobby(..))));
+        assert_matches!(result, Err(InternalError::InactiveLobby(..)));
         assert!(player_conn.lobby.is_none());
         assert!(player_conn.creds.is_none());
     }
@@ -1394,7 +1395,7 @@ mod player_conn_tests {
         let usernames = vec!["player1".to_string()];
         let lobby_name = "lobby_name";
         let (_state, mut player_conns) =
-            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+            new_test_server_state_with_logged_in_players(usernames.clone(), 1, lobby_name).await;
         let (mut player_conn, _, mut output) = player_conns.remove(0);
 
         // WHEN
@@ -1435,7 +1436,7 @@ mod player_conn_tests {
         let usernames = vec!["player1".to_string()];
         let lobby_name = "lobby_name";
         let (state, mut player_conns) =
-            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+            new_test_server_state_with_logged_in_players(usernames.clone(), 1, lobby_name).await;
         let (mut player_conn, _, _) = player_conns.remove(0);
 
         // preconditions
@@ -1459,7 +1460,7 @@ mod player_conn_tests {
         let usernames = vec!["player1".to_string()];
         let lobby_name = "lobby_name";
         let (_state, mut player_conns) =
-            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+            new_test_server_state_with_logged_in_players(usernames.clone(), 1, lobby_name).await;
         let (mut player_conn, _, mut output) = player_conns.remove(0);
         let invalid_wager = -1000;
 
@@ -1496,7 +1497,7 @@ mod player_conn_tests {
         let usernames = vec!["player1".to_string()];
         let lobby_name = "lobby_name";
         let (_state, mut player_conns) =
-            new_test_server_state_with_logged_in_players(usernames.clone(), lobby_name).await;
+            new_test_server_state_with_logged_in_players(usernames.clone(), 1, lobby_name).await;
         let (mut player_conn, input, mut output) = player_conns.remove(0);
         let activity_timeout = Duration::from_secs(1);
 

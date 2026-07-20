@@ -23,6 +23,7 @@ use crate::server::TestDefault;
 /// `Jeopardy` is the top level struct encapsulating the entire game for a `Lobby` (stagecrew).
 /// It contains the entire game state, the board configuration, final jeopardy, buzzer queue etc.
 /// Everything needed to manage an instance of the game of Jeopardy.
+#[derive(Debug)]
 pub struct Jeopardy {
     host_password: String,
     display: JeopardyDisplayEvent,

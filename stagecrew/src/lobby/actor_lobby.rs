@@ -19,6 +19,7 @@ enum Command<G: Game> {
     Shutdown(Responder<()>),
 }
 
+#[derive(Debug)]
 pub struct Lobby<G: Game> {
     // NOTE: if the one of the clones of this handle signal a shutdown,
     // this handle will become invalidated as the receiving end will drop immediately
