@@ -2,12 +2,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::game::jeopardy::board::Board;
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct TextCard {
+    pub title: String,
+    pub content: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
-pub enum JeopardyDisplayEvent {
-    TextCard {
-        title: String,
-        content: String, // may be question or answer
-    },
+pub enum JeopardyDisplayState {
+    Question(TextCard),
+    Answer(TextCard),
+    FinalJeopardyHint(TextCard),
+    FinalJeopardyQuestion(TextCard),
+    FinalJeopardyAnswer(TextCard),
     Board(Board), // a redacted copy of the current game board
 }
 
@@ -31,7 +38,7 @@ pub enum PlayerCommand {
 #[derive(Debug, Clone, Serialize)]
 pub enum PlayerCommandResponse {
     Success,
-    Refresh(JeopardyDisplayEvent),
+    Refresh(JeopardyDisplayState),
     GetPoints(i32),
     GetWager(i32),
     GetFreeResponse(String),

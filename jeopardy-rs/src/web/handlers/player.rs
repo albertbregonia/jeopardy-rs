@@ -539,7 +539,9 @@ mod player_conn_tests {
     use crate::{
         game::{
             Jeopardy, JeopardyError,
-            commands::player::{JeopardyDisplayEvent, PlayerCommand, PlayerCommandResponse},
+            commands::player::{
+                JeopardyDisplayState, PlayerCommand, PlayerCommandResponse, TextCard,
+            },
             jeopardy::config::JeopardyConfig,
             player::{JeopardyPlayerError, JeopardyPlayerEvent},
         },
@@ -1545,10 +1547,10 @@ mod player_conn_tests {
             .unwrap();
         player_event_sender
             .send(JeopardyPlayerEvent::Display(
-                JeopardyDisplayEvent::TextCard {
+                JeopardyDisplayState::Question(TextCard {
                     title: title.clone(),
                     content: content.clone(),
-                },
+                }),
             ))
             .await
             .unwrap();
@@ -1575,7 +1577,7 @@ mod player_conn_tests {
         let response = output.recv().await.unwrap();
         let expected_response = serde_json::to_string(&PlayerResponse {
             result: Ok(PlayerCommandResponse::Refresh(
-                JeopardyDisplayEvent::TextCard { title, content },
+                JeopardyDisplayState::Question(TextCard { title, content }),
             )),
         })
         .unwrap();

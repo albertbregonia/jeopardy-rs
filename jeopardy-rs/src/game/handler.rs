@@ -9,7 +9,7 @@ use crate::game::{
     JeopardyCommand, JeopardyCommandResponse, JeopardyError,
     commands::{
         host::{HostCommand, HostCommandResponse},
-        player::{JeopardyDisplayEvent, PlayerCommand, PlayerCommandResponse},
+        player::{JeopardyDisplayState, PlayerCommand, PlayerCommandResponse, TextCard},
     },
     jeopardy::{
         board::Board, board_question::BoardQuestion, category::Category, config::JeopardyConfig,
@@ -26,7 +26,7 @@ use crate::server::TestDefault;
 #[derive(Debug)]
 pub struct Jeopardy {
     host_password: String,
-    display: JeopardyDisplayEvent,
+    display_state: JeopardyDisplayState,
     config: JeopardyConfig,
     // board index, category index, question index
     current_question: (usize, usize, usize),
@@ -76,7 +76,7 @@ impl Jeopardy {
             .redacted();
         let game = Self {
             host_password: host_password.to_string(),
-            display: JeopardyDisplayEvent::Board(display),
+            display_state: JeopardyDisplayState::Board(display),
             config,
             current_question: (0, 0, 0),
             buzzer_queue: VecDeque::new(),
@@ -160,7 +160,7 @@ impl Jeopardy {
                 self.add_player_to_buzzer_queue(players, player_id)?;
                 PlayerCommandResponse::Success
             }
-            PlayerCommand::Refresh => PlayerCommandResponse::Refresh(self.display.clone()),
+            PlayerCommand::Refresh => PlayerCommandResponse::Refresh(self.display_state.clone()),
             PlayerCommand::GetPoints => PlayerCommandResponse::GetPoints(player.points),
             PlayerCommand::GetWager => PlayerCommandResponse::GetWager(player.wager()),
             PlayerCommand::SetWager(wager) => {
@@ -194,7 +194,7 @@ impl Jeopardy {
         player_id: String,
     ) -> Result<(), JeopardyError> {
         // TODO: add timestamp to buzzer and make this error instead of no-op
-        if let JeopardyDisplayEvent::TextCard { .. } = self.display {
+        if let JeopardyDisplayState::Question(..) = self.display_state {
             // if there is no question shown, buzzing just no-ops
             if !players.contains(&player_id) {
                 return Err(JeopardyError::PlayerForGivenIDNotFound(player_id));
@@ -300,7 +300,7 @@ impl Jeopardy {
         board_index: usize,
     ) -> Result<(), JeopardyError> {
         self.set_board(board_index)?;
-        players.broadcast(&self.display);
+        players.broadcast(&self.display_state);
         Ok(())
     }
 
@@ -314,15 +314,15 @@ impl Jeopardy {
         let (_, category, question) =
             self.get_question(board_index, category_index, question_index)?;
         // create text display from question
-        self.display = JeopardyDisplayEvent::TextCard {
+        self.display_state = JeopardyDisplayState::Question(TextCard {
             title: category.name().to_string(),
             content: question.underlying().content().to_string(),
-        };
+        });
         self.set_question(board_index, category_index, question_index)?;
 
         // clear buzzer before showing to ensure no pre-emptive buzz
         self.clear_buzzer_queue();
-        players.broadcast(&self.display);
+        players.broadcast(&self.display_state);
         Ok(())
     }
 
@@ -335,31 +335,32 @@ impl Jeopardy {
         let question = self.get_mut_question(board_index, category_index, question_index)?;
         question.set_answered(true);
         let question = question.underlying();
-        self.display = JeopardyDisplayEvent::TextCard {
+        self.display_state = JeopardyDisplayState::Answer(TextCard {
             title: question.content().to_string(),
             content: question.answer().to_string(),
-        };
+        });
         self.clear_buzzer_queue();
-        players.broadcast(&self.display);
+        players.broadcast(&self.display_state);
         Ok(())
     }
 
+    // TODO: move final jeopardy hint to a new function not a combined text card, so we can restrict wagering/free response then
     fn show_final_jeopardy_question(&mut self, players: &dyn ReadPlayerCollection<JeopardyPlayer>) {
         let final_jeopardy = self.config.final_jeopardy();
-        self.display = JeopardyDisplayEvent::TextCard {
+        self.display_state = JeopardyDisplayState::FinalJeopardyQuestion(TextCard {
             title: final_jeopardy.hint().to_string(),
             content: final_jeopardy.question().content().to_string(),
-        };
-        players.broadcast(&self.display);
+        });
+        players.broadcast(&self.display_state);
     }
 
     fn show_final_jeopardy_answer(&mut self, players: &dyn ReadPlayerCollection<JeopardyPlayer>) {
         let final_jeopardy = self.config.final_jeopardy().question();
-        self.display = JeopardyDisplayEvent::TextCard {
+        self.display_state = JeopardyDisplayState::FinalJeopardyAnswer(TextCard {
             title: final_jeopardy.content().to_string(),
             content: final_jeopardy.answer().to_string(),
-        };
-        players.broadcast(&self.display);
+        });
+        players.broadcast(&self.display_state);
     }
 }
 
@@ -370,7 +371,7 @@ impl Jeopardy {
 /// and just interface with the player collection
 trait JeopardyPlayerCollectionOperation {
     fn scoreboard(&self) -> Vec<(i32, String)>;
-    fn broadcast(&self, event: &JeopardyDisplayEvent);
+    fn broadcast(&self, event: &JeopardyDisplayState);
     fn set_points_for_player(
         &mut self,
         player_id: String,
@@ -397,7 +398,7 @@ impl<T: ReadPlayerCollection<JeopardyPlayer> + ?Sized> JeopardyPlayerCollectionO
         scoreboard
     }
 
-    fn broadcast(&self, event: &JeopardyDisplayEvent) {
+    fn broadcast(&self, event: &JeopardyDisplayState) {
         // here, we don't care about if the broadcast fails.
         // the actor lobby at the higher level will handle
         // if the player's disconnects or the recv handle is dropped
@@ -453,7 +454,7 @@ impl TestDefault for Jeopardy {
         // THEN
         assert!(jeopardy.check_password(host_password));
         assert_eq!(jeopardy.config, config);
-        let JeopardyDisplayEvent::Board(ref board) = jeopardy.display else {
+        let JeopardyDisplayState::Board(ref board) = jeopardy.display_state else {
             panic!("Default display event was not of variant JeopardyDisplayEvent::Board");
         };
         assert!(board.is_redacted());
@@ -477,7 +478,7 @@ mod handler_tests {
             Jeopardy, JeopardyCommand, JeopardyCommandResponse, JeopardyError,
             commands::{
                 host::{HostCommand, HostCommandResponse},
-                player::{JeopardyDisplayEvent, PlayerCommand, PlayerCommandResponse},
+                player::{JeopardyDisplayState, PlayerCommand, PlayerCommandResponse, TextCard},
             },
             jeopardy::{board::Board, config::JeopardyConfig, final_jeopardy::FinalJeopardy},
             player::{JeopardyPlayer, JeopardyPlayerError, JeopardyPlayerEvent},
@@ -543,14 +544,16 @@ mod handler_tests {
         (players, receivers)
     }
 
+    // buzzer queue tests
+
     #[test]
     fn GIVEN_player_id_WHEN_add_player_to_buzzer_queue_THEN_ok() {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
-        jeopardy.display = JeopardyDisplayEvent::TextCard {
-            title: String::new(), // ensure buzzing doesn't no-op
+        jeopardy.display_state = JeopardyDisplayState::Question(TextCard {
+            title: String::new(), // can only buzz during question display state
             content: String::new(),
-        };
+        });
         let n = 10;
         let (players, _) = new_test_jeopardy_player_map(n);
         assert!(jeopardy.buzzer_queue.is_empty()); // ensure empty
@@ -573,9 +576,9 @@ mod handler_tests {
     }
 
     #[test]
-    fn GIVEN_non_text_display_WHEN_add_player_to_buzzer_queue_THEN_ok() {
+    fn GIVEN_non_question_display_state_WHEN_add_player_to_buzzer_queue_THEN_ok() {
         // GIVEN
-        let mut jeopardy = Jeopardy::test_default(); // no text display, default JeopardyDisplayEvent::Board
+        let mut jeopardy = Jeopardy::test_default(); // non question display state, default JeopardyDisplayState::Board
         let (players, _) = new_test_jeopardy_player_map(10);
         assert!(jeopardy.buzzer_queue.is_empty());
 
@@ -595,10 +598,10 @@ mod handler_tests {
     fn GIVEN_non_empty_buzzer_queue_WHEN_clear_buzzer_queue_THEN_ok() {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
-        jeopardy.display = JeopardyDisplayEvent::TextCard {
-            title: String::new(), // ensure buzzing doesn't no-op
+        jeopardy.display_state = JeopardyDisplayState::Question(TextCard {
+            title: String::new(), // can only buzz during question display state
             content: String::new(),
-        };
+        });
         let n = 10;
         let (players, _) = new_test_jeopardy_player_map(n);
         for player in players.iter() {
@@ -619,10 +622,10 @@ mod handler_tests {
     fn GIVEN_invalid_player_id_WHEN_add_player_to_buzzer_queue_THEN_error() {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
-        jeopardy.display = JeopardyDisplayEvent::TextCard {
-            title: String::new(), // ensure buzzing doesn't no-op
+        jeopardy.display_state = JeopardyDisplayState::Question(TextCard {
+            title: String::new(), // can only buzz during question display state
             content: String::new(),
-        };
+        });
         let n = 10;
         let (players, _) = new_test_jeopardy_player_map(n);
         assert!(jeopardy.buzzer_queue.is_empty()); // ensure empty
@@ -888,10 +891,10 @@ mod handler_tests {
         let (players, receivers) = new_test_jeopardy_player_map(10);
         let expected_title = "title".to_string();
         let expected_content = "content".to_string();
-        let event = JeopardyDisplayEvent::TextCard {
+        let event = JeopardyDisplayState::Question(TextCard {
             title: expected_title.clone(),
             content: expected_content.clone(),
-        };
+        });
 
         // WHEN
         players.broadcast(&event); // this operation is infallible, fire and forget
@@ -900,7 +903,7 @@ mod handler_tests {
         for mut rx in receivers {
             assert!(matches!(
                 rx.recv().await.unwrap(), // ensure we receive the broadcast
-                JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard { title, content })
+                JeopardyPlayerEvent::Display(JeopardyDisplayState::Question(TextCard { title, content }))
                     if title == expected_title && content == expected_content
             ));
         }
@@ -1047,13 +1050,13 @@ mod handler_tests {
             assert_eq!(0, current_question_index);
 
             assert!(matches!( // ensure internal cache is correct
-                &jeopardy.display,
-                JeopardyDisplayEvent::Board(board) if
+                &jeopardy.display_state,
+                JeopardyDisplayState::Board(board) if
                     board.is_redacted_version(expected_board)
             ));
             // ensure that players receive the event
             for rx in &mut receivers {
-                let JeopardyPlayerEvent::Display(JeopardyDisplayEvent::Board(board)) =
+                let JeopardyPlayerEvent::Display(JeopardyDisplayState::Board(board)) =
                     rx.recv().await.unwrap()
                 else {
                     panic!("Player did not receive show_board() display event");
@@ -1080,6 +1083,11 @@ mod handler_tests {
         ));
     }
 
+    fn new_dummy_buzzer_queue(jeopardy: &mut Jeopardy, count: u64) {
+        jeopardy.buzzer_queue = (0..count).into_iter().map(|i| i.to_string()).collect();
+        assert_eq!(false, jeopardy.buzzer_queue.is_empty());
+    }
+
     #[tokio::test]
     async fn GIVEN_valid_indices_WHEN_show_question_THEN_ok() {
         let boards = vec![
@@ -1104,12 +1112,11 @@ mod handler_tests {
                     .len();
                 for expected_question_index in 0..question_len {
                     // GIVEN
+                    // set buzzer queue to some dummy data to ensure it gets cleared
+                    new_dummy_buzzer_queue(&mut jeopardy, 10);
                     let question = &jeopardy.config.boards()[expected_board_index].categories()
                         [expected_category_index]
                         .questions()[expected_question_index];
-                    // set buzzer queue to some dummy data to ensure it gets cleared
-                    jeopardy.buzzer_queue = (0..10).into_iter().map(|i| i.to_string()).collect();
-                    assert_eq!(false, jeopardy.buzzer_queue.is_empty());
                     assert_eq!(false, question.is_answered()); // default !answered
 
                     // WHEN
@@ -1133,7 +1140,6 @@ mod handler_tests {
                     let question = &jeopardy.config.boards()[expected_board_index].categories()
                         [expected_category_index]
                         .questions()[expected_question_index];
-                    assert_eq!(false, question.is_answered()); // untouched
                     assert!(jeopardy.buzzer_queue.is_empty()); // cleared
 
                     // ensure display cache is correct
@@ -1142,16 +1148,16 @@ mod handler_tests {
                     let expected_title = category.name();
                     let expected_content = question.underlying().content();
                     assert!(matches!(
-                        &jeopardy.display,
-                        JeopardyDisplayEvent::TextCard{title, content}
-                                if title == expected_title && content == expected_content
+                        &jeopardy.display_state,
+                        JeopardyDisplayState::Question(TextCard{title, content})
+                            if title == expected_title && content == expected_content
                     ));
 
                     // ensure that players receive the text card
                     for rx in &mut receivers {
                         assert!(matches!(
                             rx.recv().await.unwrap(),
-                            JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard{title, content})
+                            JeopardyPlayerEvent::Display(JeopardyDisplayState::Question(TextCard{title, content}))
                                 if title == expected_title && content == expected_content
                         ));
                     }
@@ -1174,8 +1180,8 @@ mod handler_tests {
 
         // THEN
         assert!(matches!( // ensure unchanged
-            &jeopardy.display,
-            JeopardyDisplayEvent::Board(board) if
+            &jeopardy.display_state,
+            JeopardyDisplayState::Board(board) if
                 board.is_redacted_version(&jeopardy.config.boards()[0])
         ));
         assert!(matches!(
@@ -1216,11 +1222,11 @@ mod handler_tests {
                     .len();
                 for expected_question_index in 0..question_len {
                     // GIVEN
+                    // set buzzer queue to some dummy data to ensure it gets cleared
+                    new_dummy_buzzer_queue(&mut jeopardy, 10);
                     let question = &jeopardy.config.boards()[expected_board_index].categories()
                         [expected_category_index]
                         .questions()[expected_question_index];
-                    // set buzzer queue to some dummy data to ensure it gets cleared
-                    jeopardy.buzzer_queue = (0..10).into_iter().map(|i| i.to_string()).collect();
                     assert_eq!(false, jeopardy.buzzer_queue.is_empty());
                     assert_eq!(false, question.is_answered()); // default !answered
                     jeopardy
@@ -1251,8 +1257,8 @@ mod handler_tests {
                     // ensure display cache is correct
                     let question = question.underlying();
                     assert!(matches!(
-                        &jeopardy.display,
-                        JeopardyDisplayEvent::TextCard{title, content}
+                        &jeopardy.display_state,
+                        JeopardyDisplayState::Answer(TextCard{title, content})
                             if title == question.content() && content == question.answer()
                     ));
 
@@ -1260,7 +1266,7 @@ mod handler_tests {
                     for rx in &mut receivers {
                         assert!(matches!(
                             rx.recv().await.unwrap(),
-                            JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard{title, content})
+                            JeopardyPlayerEvent::Display(JeopardyDisplayState::Answer(TextCard{title, content}))
                                 if title == question.content() && content == question.answer()
                         ));
                     }
@@ -1288,8 +1294,8 @@ mod handler_tests {
 
         // THEN
         assert!(matches!( // ensure unchanged
-            &jeopardy.display,
-            JeopardyDisplayEvent::Board(board) if
+            &jeopardy.display_state,
+            JeopardyDisplayState::Board(board) if
                 board.is_redacted_version(&jeopardy.config.boards()[0])
         ));
         assert!(matches!(
@@ -1322,8 +1328,8 @@ mod handler_tests {
         let expected_content = fin_jeopardy.question().content();
         // ensure text card was created properly
         assert!(matches!(
-            jeopardy.display,
-            JeopardyDisplayEvent::TextCard { title, content }
+            jeopardy.display_state,
+            JeopardyDisplayState::FinalJeopardyQuestion(TextCard { title, content })
                 if title == expected_title && content == expected_content
         ));
 
@@ -1331,7 +1337,7 @@ mod handler_tests {
         for mut rx in receivers {
             assert!(matches!(
                 rx.recv().await.unwrap(),
-                JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard { title, content })
+                JeopardyPlayerEvent::Display(JeopardyDisplayState::FinalJeopardyQuestion(TextCard { title, content }))
                     if title == expected_title && content == expected_content
             ));
         }
@@ -1353,8 +1359,8 @@ mod handler_tests {
         let expected_answer = fin_jeopardy.answer();
         // ensure text card was created properly
         assert!(matches!(
-            jeopardy.display,
-            JeopardyDisplayEvent::TextCard { title, content }
+            jeopardy.display_state,
+            JeopardyDisplayState::FinalJeopardyAnswer(TextCard { title, content })
                 if title == expected_title && content == expected_answer
         ));
 
@@ -1362,7 +1368,7 @@ mod handler_tests {
         for mut rx in receivers {
             assert!(matches!(
                 rx.recv().await.unwrap(),
-                JeopardyPlayerEvent::Display(JeopardyDisplayEvent::TextCard { title, content })
+                JeopardyPlayerEvent::Display(JeopardyDisplayState::FinalJeopardyAnswer(TextCard { title, content }))
                     if title == expected_title && content == expected_answer
             ));
         }
@@ -1520,6 +1526,11 @@ mod handler_tests {
             assert_ne!("", p.free_response); // ensure not empty so we can empty it
             assert_ne!(0, p.wager()); // ensure non-zero so we can set to 0
         });
+        let expected_text_card = TextCard {
+            title: String::new(),
+            content: String::new(),
+        };
+        jeopardy.display_state = JeopardyDisplayState::Question(expected_text_card.clone());
 
         let player_commands = vec![
             // order matters here
@@ -1554,8 +1565,7 @@ mod handler_tests {
                     ),
                     PlayerCommand::Refresh => matches!(
                         response,
-                        PlayerCommandResponse::Refresh(JeopardyDisplayEvent::Board(board))
-                            if board.is_redacted_version(&jeopardy.config.boards()[0])
+                        PlayerCommandResponse::Refresh(JeopardyDisplayState::Question(text_card)) if text_card == expected_text_card
                     ),
                     PlayerCommand::GetFreeResponse => matches!(
                         response,

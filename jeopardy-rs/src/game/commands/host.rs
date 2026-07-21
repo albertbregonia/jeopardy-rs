@@ -44,7 +44,7 @@ pub enum HostCommand {
 /// Most of them will send `HostCommandResponse::Success` which is equivalently `Ok(())`.
 /// Otherwise, the variant mirrors the command:
 /// ie. `HostCommand::GetAnswer` maps to `HostCommandResponse::GetAnswer(String)`
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize)]
 pub enum HostCommandResponse {
     Success,
     GetAnswer(String),

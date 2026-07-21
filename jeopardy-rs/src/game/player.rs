@@ -5,12 +5,12 @@ use stagecrew::player::Player;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::game::commands::player::JeopardyDisplayEvent;
+use crate::game::commands::player::JeopardyDisplayState;
 
 /// `JeopardyPlayerEvent` is content to be sent to the player
 #[derive(Debug, Clone, Serialize)]
 pub enum JeopardyPlayerEvent {
-    Display(JeopardyDisplayEvent),
+    Display(JeopardyDisplayState),
     PointsUpdate(i32),
 }
 
