@@ -20,6 +20,8 @@ use crate::game::{
 #[cfg(test)]
 use crate::server::TestDefault;
 
+const FINAL_JEOPARDY_HINT_TITLE: &str = "Final Jeopardy Hint";
+
 /// `Jeopardy` is the top level struct encapsulating the entire game for a `Lobby` (stagecrew).
 /// It contains the entire game state, the board configuration, final jeopardy, buzzer queue etc.
 /// Everything needed to manage an instance of the game of Jeopardy.
@@ -127,6 +129,10 @@ impl Jeopardy {
                 category_index,
                 question_index,
             )?),
+            HostCommand::ShowFinalJeopardyHint => {
+                self.show_final_jeopardy_hint(players);
+                HostCommandResponse::Success
+            }
             HostCommand::ShowFinalJeopardyQuestion => {
                 self.show_final_jeopardy_question(players);
                 HostCommandResponse::Success
@@ -344,8 +350,18 @@ impl Jeopardy {
         Ok(())
     }
 
-    // TODO: move final jeopardy hint to a new function not a combined text card, so we can restrict wagering/free response then
+    fn show_final_jeopardy_hint(&mut self, players: &dyn ReadPlayerCollection<JeopardyPlayer>) {
+        // TODO: restrict set_wager() to JeopardyDisplayState::FinalJeopardyHint
+        let final_jeopardy = self.config.final_jeopardy();
+        self.display_state = JeopardyDisplayState::FinalJeopardyHint(TextCard {
+            title: FINAL_JEOPARDY_HINT_TITLE.to_string(),
+            content: final_jeopardy.hint().to_string(),
+        });
+        players.broadcast(&self.display_state);
+    }
+
     fn show_final_jeopardy_question(&mut self, players: &dyn ReadPlayerCollection<JeopardyPlayer>) {
+        // TODO: restrict set_free_response() to JeopardyDisplayState::FinalJeopardyQuestion
         let final_jeopardy = self.config.final_jeopardy();
         self.display_state = JeopardyDisplayState::FinalJeopardyQuestion(TextCard {
             title: final_jeopardy.hint().to_string(),
@@ -480,11 +496,13 @@ mod handler_tests {
                 host::{HostCommand, HostCommandResponse},
                 player::{JeopardyDisplayState, PlayerCommand, PlayerCommandResponse, TextCard},
             },
+            handler::FINAL_JEOPARDY_HINT_TITLE,
             jeopardy::{board::Board, config::JeopardyConfig, final_jeopardy::FinalJeopardy},
             player::{JeopardyPlayer, JeopardyPlayerError, JeopardyPlayerEvent},
         },
         server::TestDefault,
     };
+    use std::assert_matches;
 
     #[test]
     fn GIVEN_jeopardy_handler_WHEN_new_THEN_ok() {
@@ -1374,6 +1392,36 @@ mod handler_tests {
         }
     }
 
+    #[tokio::test]
+    async fn GIVEN_jeopardy_WHEN_show_final_jeopardy_hint_THEN_ok() {
+        // infallible - so no negative test
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let (players, receivers) = new_test_jeopardy_player_map(10);
+
+        // WHEN
+        jeopardy.show_final_jeopardy_hint(&players);
+
+        // THEN
+        let hint = jeopardy.config.final_jeopardy().hint();
+        let expected_title = FINAL_JEOPARDY_HINT_TITLE.to_string();
+        // ensure text card was created properly
+        assert!(matches!(
+            jeopardy.display_state,
+            JeopardyDisplayState::FinalJeopardyHint(TextCard { title, content })
+                if title == expected_title && content == hint
+        ));
+
+        // ensure players receive the same event
+        for mut rx in receivers {
+            assert!(matches!(
+                rx.recv().await.unwrap(),
+                JeopardyPlayerEvent::Display(JeopardyDisplayState::FinalJeopardyHint(TextCard { title, content }))
+                    if title == expected_title && content == hint
+            ));
+        }
+    }
+
     // this test only ensures that RequestA -> ResponseA
     // the perspective here is ensuring that the caller receives a response we expect (as this is a near top level handler)
     // not validating internal state exhaustively (other unit tests do that)
@@ -1417,8 +1465,9 @@ mod handler_tests {
                 question_index: 0,
             },
             HostCommand::ShowCurrentAnswer,
-            HostCommand::ShowFinalJeopardyAnswer,
+            HostCommand::ShowFinalJeopardyHint,
             HostCommand::ShowFinalJeopardyQuestion,
+            HostCommand::ShowFinalJeopardyAnswer,
         ];
         // WHEN
         for command in host_commands {
@@ -1430,35 +1479,35 @@ mod handler_tests {
                 )
                 .unwrap();
             // THEN - ensure responses are what we expect
-            let maps_correctly = match command {
+            match command {
                 HostCommand::GetBuzzerQueue => {
-                    matches!(
+                    assert_matches!(
                         response,
                         HostCommandResponse::GetBuzzerQueue(queue)
                             if queue == expected_buzzer_queue
                     )
                 }
                 HostCommand::ClearBuzzerQueue => {
-                    matches!(response, HostCommandResponse::Success)
+                    assert_matches!(response, HostCommandResponse::Success)
                 }
                 HostCommand::UpdatePoints { delta, .. } => {
-                    matches!(
+                    assert_matches!(
                         response,
                         HostCommandResponse::UpdatePoints(points)
                             if points == init_points + delta
                     )
                 }
                 HostCommand::SetPoints { .. } => {
-                    matches!(response, HostCommandResponse::Success)
+                    assert_matches!(response, HostCommandResponse::Success)
                 }
                 HostCommand::ShowBoard { .. } => {
-                    matches!(response, HostCommandResponse::Success)
+                    assert_matches!(response, HostCommandResponse::Success)
                 }
                 HostCommand::ShowQuestion { .. } => {
-                    matches!(response, HostCommandResponse::Success)
+                    assert_matches!(response, HostCommandResponse::Success)
                 }
                 HostCommand::ShowCurrentAnswer => {
-                    matches!(response, HostCommandResponse::Success)
+                    assert_matches!(response, HostCommandResponse::Success)
                 }
                 HostCommand::GetAnswer {
                     board_index,
@@ -1470,20 +1519,22 @@ mod handler_tests {
                         .questions()[question_index]
                         .underlying()
                         .answer();
-                    matches!(
+                    assert_matches!(
                         response,
                         HostCommandResponse::GetAnswer(answer)
                             if answer == expected_answer
                     )
                 }
+                HostCommand::ShowFinalJeopardyHint => {
+                    assert_matches!(response, HostCommandResponse::Success)
+                }
                 HostCommand::ShowFinalJeopardyQuestion => {
-                    matches!(response, HostCommandResponse::Success)
+                    assert_matches!(response, HostCommandResponse::Success)
                 }
                 HostCommand::ShowFinalJeopardyAnswer => {
-                    matches!(response, HostCommandResponse::Success)
+                    assert_matches!(response, HostCommandResponse::Success)
                 }
             };
-            assert!(maps_correctly)
         }
     }
 

@@ -22,6 +22,7 @@ pub enum HostCommand {
         category_index: usize,
         question_index: usize,
     },
+    ShowFinalJeopardyHint,
     ShowFinalJeopardyQuestion,
     ShowFinalJeopardyAnswer,
     // may return JeopardyError - may be invalid player ID
