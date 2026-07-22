@@ -44,6 +44,8 @@ pub enum JeopardyError {
     InvalidCategoryIndex(usize),
     #[error("Invalid question index {0} for the given Jeopardy category")]
     InvalidQuestionIndex(usize),
+    #[error("Operation currently unavailable: {0}")]
+    OperationUnavailable(String),
     #[error("The corresponding player for ID: {0} was not found")]
     PlayerForGivenIDNotFound(String),
     #[error("Incorrect host password. Action unauthorized")]

@@ -170,15 +170,14 @@ impl Jeopardy {
             PlayerCommand::GetPoints => PlayerCommandResponse::GetPoints(player.points),
             PlayerCommand::GetWager => PlayerCommandResponse::GetWager(player.wager()),
             PlayerCommand::SetWager(wager) => {
-                player.set_wager(wager)?;
+                self.set_player_wager(player, wager)?;
                 PlayerCommandResponse::Success
             }
             PlayerCommand::GetFreeResponse => {
                 PlayerCommandResponse::GetFreeResponse(player.free_response.clone())
             }
             PlayerCommand::SetFreeResponse(free_response) => {
-                // TODO: some sort of validation
-                player.free_response = free_response;
+                self.set_player_free_response(player, free_response)?;
                 PlayerCommandResponse::Success
             }
             PlayerCommand::GetScoreboard => {
@@ -193,6 +192,44 @@ impl Jeopardy {
     }
 
     // small helper functions to manage the internal state
+
+    fn set_player_free_response(
+        &self,
+        player: &mut JeopardyPlayer,
+        free_response: String,
+    ) -> Result<(), JeopardyError> {
+        if !matches!(
+            self.display_state,
+            JeopardyDisplayState::FinalJeopardyQuestion(..)
+        ) {
+            // we can only set free response during final jeopardy
+            // or else someone can change their answer during final jeopardy reveal
+            return Err(JeopardyError::OperationUnavailable(
+                "Set free response is currently not permitted".to_string(),
+            ));
+        }
+        player.free_response = free_response;
+        Ok(())
+    }
+
+    fn set_player_wager(
+        &self,
+        player: &mut JeopardyPlayer,
+        wager: i32,
+    ) -> Result<(), JeopardyError> {
+        if !matches!(
+            self.display_state,
+            JeopardyDisplayState::FinalJeopardyHint(..)
+        ) {
+            // we can only set wager during final jeopardy hint
+            // or else someone can change their wager after they see the answer
+            return Err(JeopardyError::OperationUnavailable(
+                "Set wager is currently not permitted".to_string(),
+            ));
+        }
+        player.set_wager(wager)?;
+        Ok(())
+    }
 
     fn add_player_to_buzzer_queue(
         &mut self,
@@ -351,7 +388,6 @@ impl Jeopardy {
     }
 
     fn show_final_jeopardy_hint(&mut self, players: &dyn ReadPlayerCollection<JeopardyPlayer>) {
-        // TODO: restrict set_wager() to JeopardyDisplayState::FinalJeopardyHint
         let final_jeopardy = self.config.final_jeopardy();
         self.display_state = JeopardyDisplayState::FinalJeopardyHint(TextCard {
             title: FINAL_JEOPARDY_HINT_TITLE.to_string(),
@@ -361,7 +397,6 @@ impl Jeopardy {
     }
 
     fn show_final_jeopardy_question(&mut self, players: &dyn ReadPlayerCollection<JeopardyPlayer>) {
-        // TODO: restrict set_free_response() to JeopardyDisplayState::FinalJeopardyQuestion
         let final_jeopardy = self.config.final_jeopardy();
         self.display_state = JeopardyDisplayState::FinalJeopardyQuestion(TextCard {
             title: final_jeopardy.hint().to_string(),
@@ -426,7 +461,7 @@ impl<T: ReadPlayerCollection<JeopardyPlayer> + ?Sized> JeopardyPlayerCollectionO
         }
     }
 
-    // helepr functions to update player state
+    // helper functions to update player state
 
     fn set_points_for_player(
         &mut self,
@@ -660,6 +695,8 @@ mod handler_tests {
         assert!(jeopardy.buzzer_queue.is_empty()); // ensure still empty
     }
 
+    // get question and answer tests
+
     #[test]
     fn GIVEN_valid_indices_WHEN_get_question_and_answer_THEN_ok() {
         // GIVEN
@@ -806,6 +843,8 @@ mod handler_tests {
         (players, rx)
     }
 
+    // player points based tests
+
     #[tokio::test]
     async fn GIVEN_points_WHEN_set_points_for_player_THEN_ok() {
         // GIVEN
@@ -903,30 +942,7 @@ mod handler_tests {
         ));
     }
 
-    #[tokio::test] // there is no negative test for this bc `broadcast()` is fire and forget
-    async fn GIVEN_display_event_WHEN_broadcast_THEN_ok() {
-        // GIVEN
-        let (players, receivers) = new_test_jeopardy_player_map(10);
-        let expected_title = "title".to_string();
-        let expected_content = "content".to_string();
-        let event = JeopardyDisplayState::Question(TextCard {
-            title: expected_title.clone(),
-            content: expected_content.clone(),
-        });
-
-        // WHEN
-        players.broadcast(&event); // this operation is infallible, fire and forget
-
-        // THEN
-        for mut rx in receivers {
-            assert!(matches!(
-                rx.recv().await.unwrap(), // ensure we receive the broadcast
-                JeopardyPlayerEvent::Display(JeopardyDisplayState::Question(TextCard { title, content }))
-                    if title == expected_title && content == expected_content
-            ));
-        }
-    }
-
+    // set board/question tests
     #[test]
     fn GIVEN_valid_indices_WHEN_set_question_THEN_ok() {
         // GIVEN
@@ -1037,6 +1053,32 @@ mod handler_tests {
             Err(JeopardyError::InvalidBoardIndex(index))
                 if index == invalid_board_index
         ));
+    }
+
+    // display based tests
+
+    #[tokio::test] // there is no negative test for this bc `broadcast()` is fire and forget
+    async fn GIVEN_display_state_WHEN_broadcast_THEN_ok() {
+        // GIVEN
+        let (players, receivers) = new_test_jeopardy_player_map(10);
+        let expected_title = "title".to_string();
+        let expected_content = "content".to_string();
+        let event = JeopardyDisplayState::Question(TextCard {
+            title: expected_title.clone(),
+            content: expected_content.clone(),
+        });
+
+        // WHEN
+        players.broadcast(&event); // this operation is infallible, fire and forget
+
+        // THEN
+        for mut rx in receivers {
+            assert!(matches!(
+                rx.recv().await.unwrap(), // ensure we receive the broadcast
+                JeopardyPlayerEvent::Display(JeopardyDisplayState::Question(TextCard { title, content }))
+                    if title == expected_title && content == expected_content
+            ));
+        }
     }
 
     #[tokio::test]
@@ -1422,6 +1464,106 @@ mod handler_tests {
         }
     }
 
+    // set wager/free response tests
+
+    #[test]
+    fn GIVEN_final_jeopardy_hint_WHEN_set_player_wager_THEN_ok() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let test_response = "test_response";
+        let player_id = "player_id";
+        let (mut player_map, _recv) = new_test_player_map_with_setup(player_id.to_string(), |_| {});
+        let mut player = player_map.get_mut(player_id).unwrap();
+
+        // set_player_wager only allowed during FinalJeopardyQuestion
+        jeopardy.display_state = JeopardyDisplayState::FinalJeopardyQuestion(TextCard {
+            title: String::new(),
+            content: String::new(),
+        });
+
+        // WHEN
+        jeopardy
+            .set_player_free_response(&mut player, test_response.to_string())
+            .unwrap();
+
+        // THEN
+        assert_eq!(test_response, player.free_response);
+    }
+
+    #[test]
+    fn GIVEN_non_final_jeopardy_hint_WHEN_set_player_wager_THEN_error() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let test_response = "test_response";
+        let player_id = "player_id";
+        let (mut player_map, _recv) = new_test_player_map_with_setup(player_id.to_string(), |_| {});
+        let mut player = player_map.get_mut(player_id).unwrap();
+
+        // not FinalJeopardyQuestion, should error
+        jeopardy.display_state = JeopardyDisplayState::Question(TextCard {
+            title: String::new(),
+            content: String::new(),
+        });
+
+        // WHEN
+        let result = jeopardy.set_player_free_response(&mut player, test_response.to_string());
+
+        // THEN
+        assert_matches!(result, Err(JeopardyError::OperationUnavailable(..)));
+    }
+
+    #[test]
+    fn GIVEN_final_jeopardy_question_WHEN_set_player_free_response_THEN_ok() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let player_id = "player_id";
+        let points = 100;
+        let expected_wager = points;
+        let (mut player_map, _recv) = new_test_player_map_with_setup(player_id.to_string(), |p| {
+            p.points = points;
+        });
+        let mut player = player_map.get_mut(player_id).unwrap();
+
+        // set_player_free_response only allowed during FinalJeopardyHint
+        jeopardy.display_state = JeopardyDisplayState::FinalJeopardyHint(TextCard {
+            title: String::new(),
+            content: String::new(),
+        });
+
+        // WHEN
+        jeopardy
+            .set_player_wager(&mut player, expected_wager)
+            .unwrap();
+
+        // THEN
+        assert_eq!(expected_wager, player.wager());
+    }
+
+    #[test]
+    fn GIVEN_non_final_jeopardy_question_WHEN_set_player_free_response_THEN_error() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let player_id = "player_id";
+        let wager = 0; // always valid
+        let (mut player_map, _recv) =
+            new_test_player_map_with_setup(player_id.to_string(), |_p| {});
+        let mut player = player_map.get_mut(player_id).unwrap();
+
+        // not FinalJeopardyHint, should error
+        jeopardy.display_state = JeopardyDisplayState::Question(TextCard {
+            title: String::new(),
+            content: String::new(),
+        });
+
+        // WHEN
+        let result = jeopardy.set_player_wager(&mut player, wager);
+
+        // THEN
+        assert_matches!(result, Err(JeopardyError::OperationUnavailable(..)));
+    }
+
+    // top level handler tests
+
     // this test only ensures that RequestA -> ResponseA
     // the perspective here is ensuring that the caller receives a response we expect (as this is a near top level handler)
     // not validating internal state exhaustively (other unit tests do that)
@@ -1546,6 +1688,7 @@ mod handler_tests {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
         let (mut players, _) = new_test_jeopardy_player_map(10);
+        // helper struct to encapsulate expected player state
         struct PlayerTestConfig {
             points: i32,
             wager: i32,
@@ -1581,9 +1724,8 @@ mod handler_tests {
             title: String::new(),
             content: String::new(),
         };
-        jeopardy.display_state = JeopardyDisplayState::Question(expected_text_card.clone());
 
-        let player_commands = vec![
+        let player_commands = [
             // order matters here
             PlayerCommand::Buzz,
             PlayerCommand::GetPoints,
@@ -1597,28 +1739,39 @@ mod handler_tests {
         // WHEN
         for (player_id, config) in test_configs {
             for command in player_commands.clone() {
+                // special cases where inner state needs to be set
+                // before the command can be successfully executed
+                jeopardy.display_state = match &command {
+                    PlayerCommand::SetFreeResponse(..) => {
+                        JeopardyDisplayState::FinalJeopardyQuestion(expected_text_card.clone())
+                    }
+                    PlayerCommand::SetWager(..) => {
+                        JeopardyDisplayState::FinalJeopardyHint(expected_text_card.clone())
+                    }
+                    _ => JeopardyDisplayState::Question(expected_text_card.clone()),
+                };
                 let response = jeopardy
                     .handle_player_command(&mut players, player_id.clone(), command.clone())
                     .unwrap();
                 let player = players.get_mut(&player_id).unwrap();
                 // THEN - ensure responses are what we expect
-                let maps_correctly = match command {
+                match command {
                     PlayerCommand::Buzz => {
-                        matches!(response, PlayerCommandResponse::Success)
+                        assert_matches!(response, PlayerCommandResponse::Success)
                     }
                     PlayerCommand::GetPoints => {
-                        matches!(response, PlayerCommandResponse::GetPoints(points) if points == player.points)
+                        assert_matches!(response, PlayerCommandResponse::GetPoints(points) if points == player.points)
                     }
-                    PlayerCommand::GetScoreboard => matches!(
+                    PlayerCommand::GetScoreboard => assert_matches!(
                         response,
                         PlayerCommandResponse::GetScoreboard(scoreboard)
                             if scoreboard.is_sorted_by(|a, b| a >= b)
                     ),
-                    PlayerCommand::Refresh => matches!(
+                    PlayerCommand::Refresh => assert_matches!(
                         response,
                         PlayerCommandResponse::Refresh(JeopardyDisplayState::Question(text_card)) if text_card == expected_text_card
                     ),
-                    PlayerCommand::GetFreeResponse => matches!(
+                    PlayerCommand::GetFreeResponse => assert_matches!(
                         response,
                         PlayerCommandResponse::GetFreeResponse(free_resp)
                             if free_resp == config.free_response
@@ -1626,17 +1779,16 @@ mod handler_tests {
                     PlayerCommand::SetFreeResponse(free_resp) => {
                         // we test this here bc `handle_player_command()` set manually
                         assert_eq!(free_resp, player.free_response);
-                        matches!(response, PlayerCommandResponse::Success)
+                        assert_matches!(response, PlayerCommandResponse::Success)
                     }
                     PlayerCommand::GetWager => {
-                        matches!(response, PlayerCommandResponse::GetWager(wager) if wager == player.wager())
+                        assert_matches!(response, PlayerCommandResponse::GetWager(wager) if wager == player.wager())
                     }
                     PlayerCommand::SetWager(wager) => {
                         assert_eq!(wager, player.wager());
-                        matches!(response, PlayerCommandResponse::Success)
+                        assert_matches!(response, PlayerCommandResponse::Success)
                     }
                 };
-                assert!(maps_correctly)
             }
         }
     }
@@ -1714,6 +1866,10 @@ mod handler_tests {
     fn GIVEN_player_error_WHEN_handle_event_THEN_error() {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
+        jeopardy.display_state = JeopardyDisplayState::FinalJeopardyHint(TextCard {
+            title: String::new(), // can only call set wager during FinalJeopardyHint
+            content: String::new(),
+        });
         let (mut players, _) = new_test_jeopardy_player_map(10);
         let player_id = players.iter().next().map(|p| p.id().to_string()).unwrap();
         let invalid_wager = -1;

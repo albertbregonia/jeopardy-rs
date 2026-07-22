@@ -224,7 +224,7 @@ mod host_command_tests {
             host_command::{HostRequest, HostResponse},
             test_util::{
                 new_test_manager_server_state, new_test_server_state,
-                new_test_server_state_with_player, shutdown_lobby,
+                new_test_server_state_with_player, send_host_command_for_lobby, shutdown_lobby,
             },
         },
     };
@@ -392,6 +392,26 @@ mod host_command_tests {
         ];
 
         for command in commands {
+            // special cases because in order for these commands to respond OK
+            // internal state needs to be set
+            if let PlayerCommand::SetFreeResponse(..) = command {
+                send_host_command_for_lobby(
+                    &state,
+                    &create_lobby_request.lobby_name,
+                    &create_lobby_request.host_password,
+                    HostCommand::ShowFinalJeopardyQuestion,
+                )
+                .await;
+            }
+            if let PlayerCommand::SetWager(..) = command {
+                send_host_command_for_lobby(
+                    &state,
+                    &create_lobby_request.lobby_name,
+                    &create_lobby_request.host_password,
+                    HostCommand::ShowFinalJeopardyHint,
+                )
+                .await;
+            }
             let host_request = HostRequest {
                 lobby_password: create_lobby_request.lobby_password.clone(),
                 command: JeopardyCommand::Player {

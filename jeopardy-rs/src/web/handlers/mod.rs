@@ -86,6 +86,8 @@ mod serialize_result_tests {
 
 #[cfg(test)]
 pub mod test_util {
+    use crate::game::JeopardyCommand;
+    use crate::game::commands::host::HostCommand;
     use crate::server::{CredsValidatorGeneric, ManagerGeneric};
     use crate::web::handlers::create_lobby::{CreateLobbyRequest, CreateLobbyResponse};
     use crate::{
@@ -223,5 +225,28 @@ pub mod test_util {
         lobby_id: &str,
     ) -> bool {
         state.manager().read().await.has(lobby_id).unwrap()
+    }
+
+    // many commands require a host command to set internal state first before a command is valid
+    pub async fn send_host_command_for_lobby<M: ManagerGeneric, C: CredsValidatorGeneric>(
+        state: &JeopardyServerStateGeneric<M, C>,
+        lobby_id: &str,
+        host_password: &str,
+        command: HostCommand,
+    ) {
+        state
+            .manager()
+            .read()
+            .await
+            .get(lobby_id)
+            .unwrap()
+            .lobby()
+            .send_game_event_and_wait(JeopardyCommand::Host {
+                host_password: host_password.to_string(),
+                command,
+            })
+            .await
+            .unwrap()
+            .unwrap();
     }
 }

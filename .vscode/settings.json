@@ -1,4 +1,5 @@
 {
     // "Run Test" hint from rust analyzer may not compile with features 
-    "rust-analyzer.cargo.allFeatures": true
+    "rust-analyzer.cargo.allFeatures": true,
+    "editor.formatOnSave": true,
 }

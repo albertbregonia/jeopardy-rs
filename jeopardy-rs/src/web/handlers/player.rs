@@ -539,8 +539,9 @@ mod player_conn_tests {
     use crate::{
         game::{
             Jeopardy, JeopardyError,
-            commands::player::{
-                JeopardyDisplayState, PlayerCommand, PlayerCommandResponse, TextCard,
+            commands::{
+                host::HostCommand,
+                player::{JeopardyDisplayState, PlayerCommand, PlayerCommandResponse, TextCard},
             },
             jeopardy::config::JeopardyConfig,
             player::{JeopardyPlayerError, JeopardyPlayerEvent},
@@ -557,7 +558,8 @@ mod player_conn_tests {
             },
             test_util::{
                 TestManagerServerState, lobby_has_player, new_test_manager_server_state,
-                new_test_server_state, new_test_server_state_with_player, shutdown_lobby,
+                new_test_server_state, new_test_server_state_with_player,
+                send_host_command_for_lobby, shutdown_lobby,
             },
             validators::nonzero_ascii::NonZeroAsciiValidator,
         },
@@ -1461,8 +1463,17 @@ mod player_conn_tests {
         // GIVEN
         let usernames = vec!["player1".to_string()];
         let lobby_name = "lobby_name";
-        let (_state, mut player_conns) =
+        let (state, mut player_conns) =
             new_test_server_state_with_logged_in_players(usernames.clone(), 1, lobby_name).await;
+        // we need inner state to show final jeopardy hint to allow for SetWager
+        send_host_command_for_lobby(
+            &state,
+            lobby_name,
+            "host_password",
+            HostCommand::ShowFinalJeopardyHint,
+        )
+        .await;
+
         let (mut player_conn, _, mut output) = player_conns.remove(0);
         let invalid_wager = -1000;
 
@@ -1480,9 +1491,7 @@ mod player_conn_tests {
                 result: Err(PlayerHandlerError::User(UserError::Game(
                     JeopardyError::PlayerMisconfig(JeopardyPlayerError::InvalidWager {
                         wager: invalid_wager,
-                        // lowk this assumes the default points are 0
-                        // but we don't expose a way to obtain the default so it's fine
-                        current_points: 0,
+                        current_points: 0, // the default points are 0 in the helper
                     }),
                 ))
                 .to_string()),
