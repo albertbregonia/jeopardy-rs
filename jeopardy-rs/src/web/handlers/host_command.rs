@@ -379,6 +379,18 @@ mod host_command_tests {
         let player_id = "test_player";
         let (state, _) =
             new_test_server_state_with_player(create_lobby_request.clone(), player_id).await;
+        // show question so that buzzer works
+        send_host_command_for_lobby(
+            &state,
+            &create_lobby_request.lobby_name,
+            &create_lobby_request.host_password,
+            HostCommand::ShowQuestion {
+                board_index: 0,
+                category_index: 0,
+                question_index: 0,
+            },
+        )
+        .await;
 
         let commands = [
             PlayerCommand::Buzz,

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = [ "jeopardy-rs", "stagecrew" ]
+members = ["jeopardy-rs", "stagecrew"]
 
 [workspace.dependencies]
 tokio = { version = "*", features = ["full"] }
@@ -8,7 +8,7 @@ anyhow = "*"
 thiserror = "*"
 
 rand = "*" # daily double generation
-uuid = { version = "*", features = ["v4"]} # request ids
+uuid = { version = "*", features = ["v4"] } # request ids
 
 # json
 serde = { version = "*", features = ["derive", "rc"] }

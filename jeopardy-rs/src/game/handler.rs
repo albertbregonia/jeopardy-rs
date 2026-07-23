@@ -1,9 +1,11 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::Duration};
 
+use serde::Serialize;
 use stagecrew::{
     lobby::Game,
     player::{Player, ReadPlayerCollection, player_map::PlayerMap},
 };
+use tokio::time::Instant;
 
 use crate::game::{
     JeopardyCommand, JeopardyCommandResponse, JeopardyError,
@@ -32,7 +34,20 @@ pub struct Jeopardy {
     config: JeopardyConfig,
     // board index, category index, question index
     current_question: (usize, usize, usize),
-    buzzer_queue: VecDeque<String>, // vec of IDs
+    buzzer_queue: VecDeque<BuzzerEntry>, // vec of IDs and timestamps
+}
+
+#[derive(Debug)]
+pub struct BuzzerEntry {
+    id: String,
+    timestamp: Instant,
+}
+
+/// returns the time difference from the fastest buzzer, 0 if fastest
+#[derive(Debug, Serialize)]
+pub struct BuzzerLatency {
+    id: String,
+    latency: Duration,
 }
 
 /// impl Game for Jeopardy allows us to give a hook into `Lobby`
@@ -146,7 +161,7 @@ impl Jeopardy {
                 HostCommandResponse::Success
             }
             HostCommand::GetBuzzerQueue => {
-                HostCommandResponse::GetBuzzerQueue(self.buzzer_queue.clone())
+                HostCommandResponse::GetBuzzerQueue(self.convert_buzzer_queue_to_latencies())
             }
         };
         Ok(result)
@@ -236,15 +251,33 @@ impl Jeopardy {
         players: &dyn ReadPlayerCollection<JeopardyPlayer>,
         player_id: String,
     ) -> Result<(), JeopardyError> {
-        // TODO: add timestamp to buzzer and make this error instead of no-op
-        if let JeopardyDisplayState::Question(..) = self.display_state {
-            // if there is no question shown, buzzing just no-ops
-            if !players.contains(&player_id) {
-                return Err(JeopardyError::PlayerForGivenIDNotFound(player_id));
-            }
-            self.buzzer_queue.push_back(player_id);
+        if !players.contains(&player_id) {
+            return Err(JeopardyError::PlayerForGivenIDNotFound(player_id));
         }
+        if !matches!(self.display_state, JeopardyDisplayState::Question(..)) {
+            return Err(JeopardyError::OperationUnavailable(
+                "Buzzing is only available when a question is shown.".to_string(),
+            ));
+        }
+        self.buzzer_queue.push_back(BuzzerEntry {
+            id: player_id,
+            timestamp: Instant::now(),
+        });
         Ok(())
+    }
+
+    fn convert_buzzer_queue_to_latencies(&self) -> VecDeque<BuzzerLatency> {
+        if self.buzzer_queue.is_empty() {
+            return VecDeque::new();
+        }
+        let earliest_timestamp = self.buzzer_queue[0].timestamp; // fastest player timestamp
+        self.buzzer_queue
+            .iter()
+            .map(|entry| BuzzerLatency {
+                id: entry.id.clone(),
+                latency: entry.timestamp.duration_since(earliest_timestamp),
+            })
+            .collect()
     }
 
     fn clear_buzzer_queue(&mut self) {
@@ -521,12 +554,13 @@ mod handler_tests {
         lobby::Game,
         player::{Player, ReadPlayerCollection, WritePlayerCollection, player_map::PlayerMap},
     };
-    use tokio::sync::mpsc;
+    use tokio::{sync::mpsc, time::Instant};
 
     use super::JeopardyPlayerCollectionOperation;
     use crate::{
         game::{
-            Jeopardy, JeopardyCommand, JeopardyCommandResponse, JeopardyError,
+            BuzzerEntry, Jeopardy, JeopardyCommand, JeopardyCommandResponse,
+            JeopardyError::{self, OperationUnavailable},
             commands::{
                 host::{HostCommand, HostCommandResponse},
                 player::{JeopardyDisplayState, PlayerCommand, PlayerCommandResponse, TextCard},
@@ -537,7 +571,7 @@ mod handler_tests {
         },
         server::TestDefault,
     };
-    use std::assert_matches;
+    use std::{assert_matches, time::Duration};
 
     #[test]
     fn GIVEN_jeopardy_handler_WHEN_new_THEN_ok() {
@@ -623,8 +657,8 @@ mod handler_tests {
         // THEN
         assert_eq!(jeopardy.buzzer_queue.len(), id_order.len()); // ensure queued length is the same as player length
         for expected_id in id_order {
-            let id = jeopardy.buzzer_queue.pop_front().unwrap();
-            assert_eq!(id, expected_id); // ensure that queue order matches id order
+            let entry = jeopardy.buzzer_queue.pop_front().unwrap();
+            assert_eq!(entry.id, expected_id); // ensure that queue order matches id order
         }
     }
 
@@ -637,10 +671,8 @@ mod handler_tests {
 
         // WHEN
         for player in players.iter() {
-            // should be no-ops
-            jeopardy
-                .add_player_to_buzzer_queue(&players, player.id().to_string())
-                .unwrap();
+            let result = jeopardy.add_player_to_buzzer_queue(&players, player.id().to_string());
+            assert_matches!(result, Err(OperationUnavailable(..)));
         }
 
         // THEN - should stay empty
@@ -693,6 +725,42 @@ mod handler_tests {
             Err(JeopardyError::PlayerForGivenIDNotFound(id)) if id == invalid_id
         ));
         assert!(jeopardy.buzzer_queue.is_empty()); // ensure still empty
+    }
+
+    #[test]
+    fn GIVEN_buzzer_queue_WHEN_get_buzzer_queue_THEN_ok() {
+        // GIVEN
+        let mut jeopardy = Jeopardy::test_default();
+        let n = 10;
+        let (mut players, _recvs) = new_test_jeopardy_player_map(n);
+        // set buzzer queue to some dummy data to ensure it gets cleared
+        let baseline = Instant::now(); // we need a baseline bc if we keep calling Instant::now() there may be ns/us diff
+        jeopardy.buzzer_queue = (0..n)
+            .into_iter()
+            .map(|i| BuzzerEntry {
+                id: i.to_string(),
+                timestamp: baseline + Duration::from_secs(i as u64),
+            })
+            .collect();
+        assert_eq!(false, jeopardy.buzzer_queue.is_empty());
+
+        // WHEN
+        let response = jeopardy
+            .handle_host_command(
+                &mut players,
+                jeopardy.host_password.clone(),
+                HostCommand::GetBuzzerQueue,
+            )
+            .unwrap();
+
+        // THEN
+        let HostCommandResponse::GetBuzzerQueue(diffs) = response else {
+            panic!("")
+        };
+        diffs.iter().zip(0..n).for_each(|(diff, id)| {
+            assert_eq!(id.to_string(), diff.id);
+            assert_eq!(Duration::from_secs(id as u64), diff.latency);
+        });
     }
 
     // get question and answer tests
@@ -1144,7 +1212,13 @@ mod handler_tests {
     }
 
     fn new_dummy_buzzer_queue(jeopardy: &mut Jeopardy, count: u64) {
-        jeopardy.buzzer_queue = (0..count).into_iter().map(|i| i.to_string()).collect();
+        jeopardy.buzzer_queue = (0..count)
+            .into_iter()
+            .map(|i| BuzzerEntry {
+                id: i.to_string(),
+                timestamp: Instant::now() + Duration::from_secs(i),
+            })
+            .collect();
         assert_eq!(false, jeopardy.buzzer_queue.is_empty());
     }
 
@@ -1571,9 +1645,7 @@ mod handler_tests {
     async fn GIVEN_host_command_WHEN_handle_host_command_THEN_ok() {
         // GIVEN
         let mut jeopardy = Jeopardy::test_default();
-        let buzzer_queue = (0..10).into_iter().map(|i| i.to_string());
-        jeopardy.buzzer_queue.extend(buzzer_queue.clone());
-        let expected_buzzer_queue = buzzer_queue.collect::<Vec<_>>();
+        new_dummy_buzzer_queue(&mut jeopardy, 10);
         assert_eq!(false, jeopardy.buzzer_queue.is_empty()); // set the buzzer queue to dummy data
 
         let (mut players, _) = new_test_jeopardy_player_map(10);
@@ -1623,11 +1695,8 @@ mod handler_tests {
             // THEN - ensure responses are what we expect
             match command {
                 HostCommand::GetBuzzerQueue => {
-                    assert_matches!(
-                        response,
-                        HostCommandResponse::GetBuzzerQueue(queue)
-                            if queue == expected_buzzer_queue
-                    )
+                    // output is validated in another test
+                    assert_matches!(response, HostCommandResponse::GetBuzzerQueue(..))
                 }
                 HostCommand::ClearBuzzerQueue => {
                     assert_matches!(response, HostCommandResponse::Success)

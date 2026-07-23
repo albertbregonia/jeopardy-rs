@@ -1404,7 +1404,7 @@ mod player_conn_tests {
 
         // WHEN
         player_conn
-            .handle_player_command(PlayerCommand::Buzz)
+            .handle_player_command(PlayerCommand::GetWager)
             .await
             .unwrap();
 
@@ -1412,7 +1412,7 @@ mod player_conn_tests {
         // ensure that the correct response was sent
         let response = output.recv().await.unwrap();
         let expected_response = serde_json::to_string(&PlayerResponse {
-            result: Ok(PlayerCommandResponse::Success),
+            result: Ok(PlayerCommandResponse::GetWager(0)), // wager is always default 0
         })
         .unwrap();
         assert_eq!(expected_response, response);
@@ -1514,7 +1514,7 @@ mod player_conn_tests {
 
         // preconditions
         input
-            .send(PlayerRequest::Command(PlayerCommand::Buzz))
+            .send(PlayerRequest::Command(PlayerCommand::GetWager))
             .await
             .unwrap();
         drop(input); // drop `input` so that the main loop cleanly disconnects - if not main() runs until timeout
@@ -1531,7 +1531,7 @@ mod player_conn_tests {
         // THEN
         let response = output.recv().await.unwrap(); // ensure that we receive the response from the lobby
         let expected_response = serde_json::to_string(&PlayerResponse {
-            result: Ok(PlayerCommandResponse::Success),
+            result: Ok(PlayerCommandResponse::GetWager(0)), // wager is always default 0
         })
         .unwrap();
         assert_eq!(expected_response, response);

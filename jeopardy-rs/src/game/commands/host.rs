@@ -2,6 +2,8 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
+use crate::game::BuzzerLatency;
+
 /// Enum of commands the host or admin of the Jeopardy game can send.
 #[derive(Debug, Deserialize, Clone)]
 pub enum HostCommand {
@@ -38,7 +40,7 @@ pub enum HostCommand {
     // variants without the comment are technically infallible
     // but the method signature cannot guarantee this
     ClearBuzzerQueue,
-    GetBuzzerQueue,
+    GetBuzzerQueue, // TODO: this should be live updated for players instead
 }
 
 /// Enum of responses the `HostCommand` requests can send back
@@ -50,5 +52,5 @@ pub enum HostCommandResponse {
     Success,
     GetAnswer(String),
     UpdatePoints(i32),
-    GetBuzzerQueue(VecDeque<String>),
+    GetBuzzerQueue(VecDeque<BuzzerLatency>),
 }
