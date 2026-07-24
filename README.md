@@ -35,3 +35,7 @@ cargo tarpaulin
 ```
 
 # background
+Originally, this project was created for my mother's birthday as a big party game that all the guests could play in teams/individually. The original code was built in a week, and was very much hard-coded to be a jeopardy web server. I eventually decided to make it into a production-grade project that could scale for multiple reasons:
+1. To be a capstone of my current abilities as a software engineer as of 2026
+2. To be a reusable library as most of my projects are based around live, multiplayer, web games
+3. To experience first-hand, creating a codebase from scratch as opposed to inheriting one from work
