@@ -1,0 +1,55 @@
+/* default stylings to ensure setup is predictable */
+
+*,
+*::before,
+*::after {
+    /* styling vars available to every element */
+
+    /* --background-color: #0a058b; */
+    --background-color: #0E137C;
+    --question-points-color: #E6AB3C;
+    --font-color: #fff;
+    --border-color: #000;
+
+    /* all elements are border-box for more predictable sizing */
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    /* app is always locked to the full size of the screen, not just min-content*/
+    height: 100%;
+    width: 100%;
+}
+
+body {
+    margin: 0;
+}
+
+h1,
+h2,
+h3,
+p {
+    /* disable default padding and margin for predictability with css */
+    padding: 0;
+    margin: 0;
+}
+
+body {
+    /* styling defaults */
+
+    /* app area is the full default window size with 15px padding */
+    padding: 15px;
+    height: 100vh;
+    width: 100vw;
+
+    font: var(--font-color);
+    background-color: var(--background-color);
+}
+
+#root {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}

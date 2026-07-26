@@ -7,7 +7,7 @@ export interface CellProps {
     onClick?: MouseEventHandler<HTMLDivElement>
 }
 
-// Cells are a simple bordered <div> that takes the size of the available space.
+// Cells are a simple <div> that takes the size of the available space.
 // It is designed to be used as part of a collection of <Cell>'s that will evenly distribute themselves.
 export function Cell({ children, className = "cell", onClick = () => { } }: CellProps) {
     return (
