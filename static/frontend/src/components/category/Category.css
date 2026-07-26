@@ -1,0 +1,62 @@
+.category {
+    /* allow content to expand to fill space */
+    display: flex;
+    flex-direction: column;
+
+    text-align: center;
+    font-family: 'Impact';
+}
+
+.category-name-cell {
+    /* inline-size required to use cqi so that font scales with width */
+    container-type: inline-size;
+
+    /* cell style */
+    border: 4px solid var(--border-color);
+    border-bottom: 8px solid var(--border-color);
+    padding: 8px;
+}
+
+.category-name {
+    /* center text */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    /* original jeopardy style */
+    color: var(--font-color);
+    text-transform: uppercase;
+    text-shadow: 2px 2px 2px #000;
+
+    /* 10% of .category-name-cell width */
+    font-size: 10cqi;
+}
+
+.category-questions {
+    /* need to be flex to expand */
+    display: flex;
+    flex-direction: column;
+    /* expand to available height */
+    flex: 1;
+}
+
+.category-question {
+    border: 4px solid var(--border-color);
+
+    /* inline-size required to use cqi so that font scales with width */
+    container-type: inline-size;
+
+    /* center text - default cell style */
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+}
+
+.points {
+    font-size: 20cqi;
+    color: var(--question-points-color);
+
+    /* text shadow is relative to font size aka em*/
+    text-shadow: 0.1em 0.1em 0.1em #000;
+}
