@@ -1,5 +1,7 @@
 import type { Category as CategoryModel } from "./types/Jeopardy";
 import { Board } from "./components/board/Board";
+import { TextCard } from "./components/textcard/TextCard";
+import { useState } from "react";
 import './App.css'
 
 function App() {
@@ -28,22 +30,28 @@ function App() {
             }
         }))
     };
+    const [showBoard, setShowBoard] = useState(true);
     return (
         <>
-            <Board board={{
-                categories: [
-                    longNamedCategory,
-                    category,
-                    category,
-                    category,
-                    category,
-                    category,
-                    category,
-                    category,
-                    category,
-                    category
-                ]
-            }} />
+            <div>
+                <button onClick={() => setShowBoard(!showBoard)}>Toggle Board</button>
+            </div>
+            {
+                showBoard ? <Board board={{
+                    categories: [
+                        longNamedCategory,
+                        category,
+                        category,
+                        category,
+                        category,
+                        category,
+                        category,
+                        category,
+                        category,
+                        category
+                    ]
+                }} /> : <TextCard title="TextCard">Sample Question</TextCard>
+            }
         </>
     )
 }

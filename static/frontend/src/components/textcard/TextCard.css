@@ -1,0 +1,26 @@
+.textcard {
+    font-family: 'Times New Roman';
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+
+    color: var(--font-color);
+    text-transform: uppercase;
+    text-shadow: 2px 2px 2px #000;
+}
+
+hr {
+    width: 100%;
+}
+
+.textcard-title {
+    padding: 20px;
+    word-wrap: normal;
+}
+
+.textcard-textcontent {
+    padding: 20px;
+    text-align: center;
+    font-size: clamp(5px, 2rem, 72px);
+}
