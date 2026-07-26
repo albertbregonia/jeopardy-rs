@@ -12,18 +12,22 @@
     /* inline-size required to use cqi so that font scales with width */
     container-type: inline-size;
 
-    /* cell style */
-    border: 4px solid var(--border-color);
-    border-bottom: 8px solid var(--border-color);
-    padding: 8px;
-}
-
-.category-name {
     /* center text */
     display: flex;
     justify-content: center;
     align-items: center;
 
+    /* prevent long name bleeding out into questions */
+    overflow: hidden;
+
+    /* cell style */
+    border: 4px solid var(--border-color);
+    border-bottom: 8px solid var(--border-color);
+    padding: 8px;
+    min-height: 50px;
+}
+
+.category-name {
     /* original jeopardy style */
     color: var(--font-color);
     text-transform: uppercase;
