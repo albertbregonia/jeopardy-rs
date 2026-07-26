@@ -1,0 +1,13 @@
+.board {
+    display: flex;
+    /* allow content to expand to fill space */
+    flex: 1;
+
+    border: 2px solid var(--border-color);
+    box-shadow: 0 10px 10px rgba(0, 0, 0, 0.5);
+
+    /* allow scrolling if there are too many elements */
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--font-color) transparent;
+}

@@ -2,6 +2,7 @@
     /* allow content to expand to fill space */
     display: flex;
     flex-direction: column;
+    flex: 1;
 
     text-align: center;
     font-family: 'Impact';
@@ -28,8 +29,8 @@
     text-transform: uppercase;
     text-shadow: 2px 2px 2px #000;
 
-    /* 10% of .category-name-cell width */
-    font-size: 10cqi;
+    /* 10% of .category-name-cell width but min 5px */
+    font-size: clamp(5px, 10cqi, 10cqi);
 }
 
 .category-questions {
@@ -54,9 +55,9 @@
 }
 
 .points {
-    font-size: 20cqi;
+    font-size: 35cqi;
     color: var(--question-points-color);
 
-    /* text shadow is relative to font size aka em*/
+    /* text shadow is relative to font size aka em */
     text-shadow: 0.1em 0.1em 0.1em #000;
 }

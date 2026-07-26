@@ -4,8 +4,6 @@
 *::before,
 *::after {
     /* styling vars available to every element */
-
-    /* --background-color: #0a058b; */
     --background-color: #0E137C;
     --question-points-color: #E6AB3C;
     --font-color: #fff;
@@ -52,15 +50,4 @@ body {
     display: flex;
     flex-direction: column;
     gap: 15px;
-}
-
-.test {
-    /* prototype for <Board> styling */
-    width: 1000px;
-    max-height: 400px;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(50px, 1fr));
-    flex: 1;
-    box-shadow: 0 5px 5px rgba(255, 255, 255, 0.35);
-    overflow: auto;
 }

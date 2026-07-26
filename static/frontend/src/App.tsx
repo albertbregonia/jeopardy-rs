@@ -1,12 +1,12 @@
-import { Category } from "./components/category/Category"
-import type { Category as JeopardyCategory } from "./types/Jeopardy";
+import type { Category as CategoryModel } from "./types/Jeopardy";
+import { Board } from "./components/board/Board";
 import './App.css'
 
 function App() {
     // dummy data to fill the components
-    const category: JeopardyCategory = {
+    const category: CategoryModel = {
         name: "Category Name",
-        questions: Array.from({ length: 6 }, () => ({
+        questions: Array.from({ length: 5 }, () => ({
             answered: false,
             dailyDouble: false,
             pointValue: Math.round(Math.random() * 1000 + 100),
@@ -16,7 +16,7 @@ function App() {
             }
         }))
     };
-    const longNamedCategory: JeopardyCategory = {
+    const longNamedCategory: CategoryModel = {
         name: "Lorem ipsum dolor sit amet consectetur, adipisicing elit.Eos esse doloremque eum corrupti nam quibusdam perspiciatis iste veniam molestias, aut sed pariatur numquam totam, vel similique quod mollitia a.Velit!",
         questions: Array.from({ length: 1 }, () => ({
             answered: false,
@@ -29,14 +29,22 @@ function App() {
         }))
     };
     return (
-        <div className="test">
-            <Category category={longNamedCategory} />
-            <Category category={category} />
-            <Category category={category} />
-            <Category category={category} />
-            <Category category={category} />
-            <Category category={category} />
-        </div>
+        <>
+            <Board board={{
+                categories: [
+                    longNamedCategory,
+                    category,
+                    category,
+                    category,
+                    category,
+                    category,
+                    category,
+                    category,
+                    category,
+                    category
+                ]
+            }} />
+        </>
     )
 }
 
