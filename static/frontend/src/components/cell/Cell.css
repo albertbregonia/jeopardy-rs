@@ -1,0 +1,9 @@
+.cell {
+    border: 1px solid #000;
+
+    /* center text */
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+}
