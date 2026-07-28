@@ -1,5 +1,6 @@
 .board {
     display: flex;
+    flex-direction: row;
     /* allow content to expand to fill space */
     flex: 1;
 

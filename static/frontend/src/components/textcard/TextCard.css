@@ -1,5 +1,4 @@
 .textcard {
-    font-family: 'Times New Roman';
     text-align: center;
     display: flex;
     flex-direction: column;
@@ -15,11 +14,13 @@ hr {
 }
 
 .textcard-title {
+    font-family: var(--text-card-title-font-family);
     padding: 20px;
     word-wrap: normal;
 }
 
 .textcard-textcontent {
+    font-family: var(--text-card-content-font-family);
     padding: 20px;
     text-align: center;
     font-size: clamp(5px, 2rem, 72px);

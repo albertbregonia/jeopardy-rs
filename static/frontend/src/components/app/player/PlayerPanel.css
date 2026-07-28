@@ -1,0 +1,18 @@
+#game-area {
+    /* fill empty space, requires parent to be flex */
+    flex: 1;
+
+    /* children also resize to fill the space */
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    padding: 15px;
+    overflow: auto;
+}
+
+#player-controls {
+    /* temporary */
+    text-align: center;
+    flex-direction: row;
+    min-height: 100px;
+}

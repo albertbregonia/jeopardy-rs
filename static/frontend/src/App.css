@@ -9,6 +9,11 @@
     --font-color: #fff;
     --border-color: #000;
 
+    --category-font-family: 'Impact';
+    --question-points-font-family: 'Impact';
+    --text-card-title-font-family: 'Times New Roman';
+    --text-card-content-font-family: 'Times New Roman';
+
     /* all elements are border-box for more predictable sizing */
     box-sizing: border-box;
 }
@@ -36,9 +41,6 @@ p {
 
 body {
     /* styling defaults */
-
-    /* app area is the full default window size with 15px padding */
-    padding: 15px;
     height: 100vh;
     width: 100vw;
 
@@ -49,5 +51,4 @@ body {
 #root {
     display: flex;
     flex-direction: column;
-    gap: 15px;
 }

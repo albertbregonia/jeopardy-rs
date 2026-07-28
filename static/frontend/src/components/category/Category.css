@@ -1,30 +1,18 @@
 .category {
-    /* allow content to expand to fill space */
     display: flex;
     flex-direction: column;
+    /* allow content to expand to fill space (width) */
     flex: 1;
-
-    text-align: center;
-    font-family: 'Impact';
+    text-overflow: ellipsis;
 }
 
 .category-name-cell {
-    /* inline-size required to use cqi so that font scales with width */
-    container-type: inline-size;
-
-    /* center text */
-    display: flex;
-    justify-content: center;
-    align-items: center;
-
-    /* prevent long name bleeding out into questions */
-    overflow: hidden;
+    text-align: center;
 
     /* cell style */
     border: 4px solid var(--border-color);
     border-bottom: 8px solid var(--border-color);
     padding: 8px;
-    min-height: 50px;
 }
 
 .category-name {
@@ -33,8 +21,9 @@
     text-transform: uppercase;
     text-shadow: 2px 2px 2px #000;
 
-    /* 10% of .category-name-cell width but min 5px */
-    font-size: clamp(5px, 10cqi, 10cqi);
+    /* half of point size bc it usually has more text */
+    font-size: calc(var(--font-size) / 2);
+    font-family: var(--category-font-family);
 }
 
 .category-questions {
@@ -47,21 +36,35 @@
 
 .category-question {
     border: 4px solid var(--border-color);
-
-    /* inline-size required to use cqi so that font scales with width */
-    container-type: inline-size;
-
-    /* center text - default cell style */
-    display: flex;
+    /* allow cell to grow evenly */
     flex: 1;
+
+    /* make cell flex so that we can center the text */
+    display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+
+    container-type: inline-size;
+    word-break: break-all;
 }
 
 .points {
-    font-size: 35cqi;
-    color: var(--question-points-color);
+    font-family: var(--question-points-font-family);
+    /* 
+        we want to scale the text with the width of the element, however,
+        using container-type: inline-size; does not
+        guarantee scaling to fit the text content.
 
+        using cqi guaranteest he cells will all fit in the parent evenly but not the text
+        using vw guarnatees all the text will fit but causes overflow past the parent size
+
+        therefore we use this with word-break: break-all so we overflow height not width
+    */
+    font-size: clamp(1em, 30cqi, 5em);
+    color: var(--question-points-color);
     /* text shadow is relative to font size aka em */
     text-shadow: 0.1em 0.1em 0.1em #000;
+    /* ensure shadow doesn't get cutoff*/
+    padding: 0.2em;
 }
