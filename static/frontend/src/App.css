@@ -6,10 +6,11 @@
     /* styling vars available to every element */
     --background-color: #0E137C;
     --question-points-color: #E6AB3C;
+    --accent-background-color: #07081c;
     --font-color: #fff;
     --border-color: #000;
 
-    --category-font-family: 'Impact';
+    --category-font-family: 'Times New Roman';
     --question-points-font-family: 'Impact';
     --text-card-title-font-family: 'Times New Roman';
     --text-card-content-font-family: 'Times New Roman';
@@ -51,4 +52,31 @@ body {
 #root {
     display: flex;
     flex-direction: column;
+    min-width: 300px;
+    min-height: 200px;
+}
+
+#app-header {
+    color: var(--font-color);
+    text-transform: uppercase;
+    letter-spacing: 1em;
+    padding: 0.75rem 2rem;
+    min-height: min-content;
+
+    background-color: var(--accent-background-color);
+    box-shadow: 0 5px 5px var(--border-color);
+}
+
+#app-main {
+    padding: 10px;
+
+    /* needed to scale child nodes */
+    display: flex;
+    flex-direction: column;
+
+    /* scale to empty space */
+    flex: 1;
+
+    /* allow shrinking, deletes min-height to root */
+    min-height: 0;
 }

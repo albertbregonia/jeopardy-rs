@@ -3,16 +3,27 @@
     flex-direction: column;
     /* allow content to expand to fill space (width) */
     flex: 1;
-    text-overflow: ellipsis;
+
+    /* add bounds to font size to be more responsive */
+    --min-font-size: 0.5rem;
+    --points-font-size: clamp(var(--min-font-size), 20cqi, 20cqi);
+    --category-font-size: clamp(var(--min-font-size), 5cqi, 5rem);
 }
 
 .category-name-cell {
+    /* the text should always scale to fit
+       but if the text is too small, then we allow scrolling */
+    overflow: auto;
+
+    /* needed for cqi with .category-name */
+    container-type: inline-size;
     text-align: center;
 
     /* cell style */
+    min-width: 50px;
     border: 4px solid var(--border-color);
     border-bottom: 8px solid var(--border-color);
-    padding: 8px;
+    padding: var(--min-font-size);
 }
 
 .category-name {
@@ -22,7 +33,7 @@
     text-shadow: 2px 2px 2px #000;
 
     /* half of point size bc it usually has more text */
-    font-size: calc(var(--font-size) / 2);
+    font-size: var(--category-font-size);
     font-family: var(--category-font-family);
 }
 
@@ -50,21 +61,9 @@
 }
 
 .points {
+    font-size: var(--points-font-size);
     font-family: var(--question-points-font-family);
-    /* 
-        we want to scale the text with the width of the element, however,
-        using container-type: inline-size; does not
-        guarantee scaling to fit the text content.
-
-        using cqi guaranteest he cells will all fit in the parent evenly but not the text
-        using vw guarnatees all the text will fit but causes overflow past the parent size
-
-        therefore we use this with word-break: break-all so we overflow height not width
-    */
-    font-size: clamp(1em, 30cqi, 5em);
     color: var(--question-points-color);
     /* text shadow is relative to font size aka em */
     text-shadow: 0.1em 0.1em 0.1em #000;
-    /* ensure shadow doesn't get cutoff*/
-    padding: 0.2em;
 }

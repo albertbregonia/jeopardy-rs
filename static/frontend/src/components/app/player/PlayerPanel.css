@@ -1,18 +1,34 @@
-#game-area {
-    /* fill empty space, requires parent to be flex */
-    flex: 1;
-
-    /* children also resize to fill the space */
+.player-panel {
     display: flex;
     flex-direction: column;
-    gap: 15px;
-    padding: 15px;
-    overflow: auto;
+    flex: 1;
+    gap: 10px;
+    background-color: var(--background-color);
+    /* needed to allow shrinking and subsequently overflow */
+    min-height: 0;
 }
 
-#player-controls {
+.game-area {
+    /* general styling */
+    box-shadow: 0 10px 10px rgba(0, 0, 0, 0.5);
+    border: 4px solid var(--border-color);
+
+    /* allow us to scale height wise */
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+
+    /* allow scrolling if there are too many elements */
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--font-color) transparent;
+    background-color: var(--background-color);
+}
+
+.player-controls {
     /* temporary */
-    text-align: center;
-    flex-direction: row;
-    min-height: 100px;
+    min-height: 10vh;
+    border-radius: 10px;
+    background-color: var(--accent-background-color);
+    padding: 1rem;
 }

@@ -3,7 +3,12 @@ import './App.css'
 
 function App() {
     return (
-        <PlayerPanel />
+        <>
+            <header id="app-header">Jeopardy</header>
+            <main id="app-main">
+                <PlayerPanel />
+            </main>
+        </>
     )
 }
 

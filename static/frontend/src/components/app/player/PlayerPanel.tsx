@@ -4,7 +4,7 @@ import { Board } from "../../board/Board";
 import type { Board as JeopardyBoard } from "../../../types/Jeopardy";
 import "./PlayerPanel.css"
 
-const jeopardy: JeopardyBoard = {
+const dummyBoard: JeopardyBoard = {
     categories: [
         {
             name: "Lorem ipsum dolor sit amet consectetur adipisicing elit. Vero tempore illo eligendi maxime aliquam incidunt sed ut veniam, ratione sapiente! Modi deserunt qui provident ratione, voluptas quia dolorem veniam minima!",
@@ -30,9 +30,9 @@ const jeopardy: JeopardyBoard = {
                 }
             }))
         },
-        ...Array.from({ length: 10 }, (_, i: number) => ({
+        ...Array.from({ length: 4 }, (_, i: number) => ({
             name: `Category ${i}`,
-            questions: Array.from({ length: 6 }, () => ({
+            questions: Array.from({ length: 5 }, () => ({
                 answered: false,
                 dailyDouble: false,
                 pointValue: Math.round(Math.random() * 1000 + 100),
@@ -51,23 +51,23 @@ export interface PlayerPanelProps {
 
 export function PlayerPanel({ }: PlayerPanelProps) {
     const [showBoard, setShowBoard] = useState(true);
-    const [b, setBoard] = useState(jeopardy);
+    const [jeopardyBoard, setBoard] = useState(dummyBoard);
     const longText = "Lorem ipsum dolor sit amet, consectetur adipisicing elit. Consectetur temporibus pariatur laboriosam blanditiis totam voluptas debitis nulla dolorem, exercitationem aliquam doloribus ad non, maxime amet! Accusamus iusto delectus nesciunt. Excepturi.";
     return (
-        <>
-            <div id="game-area">
+        <div className="player-panel">
+            <div className="game-area">
                 {
-                    showBoard ? <Board board={b} />
-                        : <TextCard title="NAMES OF PEOPLE">
-                            <div>{longText}</div>
+                    showBoard ? <Board board={jeopardyBoard} />
+                        : <TextCard title={longText}>
+                            <div>{longText}{longText}{longText}{longText}{longText}{longText}{longText}{longText}{longText}{longText}</div>
                         </TextCard>
                 }
             </div>
-            <div id="player-controls">
+            <div className="player-controls">
                 <button onClick={() => setShowBoard(!showBoard)}>Toggle</button>
-                <button onClick={() => setBoard(j => randomValue(j))}>Re-render</button>
+                <button onClick={() => setBoard(b => randomValue(b))}>Re-render</button>
             </div>
-        </>
+        </div>
     )
 }
 
