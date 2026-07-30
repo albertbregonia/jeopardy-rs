@@ -7,7 +7,7 @@
     /* add bounds to font size to be more responsive */
     --min-font-size: 0.5rem;
     --points-font-size: clamp(var(--min-font-size), 20cqi, 20cqi);
-    --category-font-size: clamp(var(--min-font-size), 5cqi, 5rem);
+    --category-font-size: clamp(var(--min-font-size), 10cqi, 5rem);
 }
 
 .category-name-cell {

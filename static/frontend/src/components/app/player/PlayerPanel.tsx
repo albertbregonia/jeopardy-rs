@@ -1,86 +1,35 @@
-import { useState } from "react";
-import { TextCard } from "../../textcard/TextCard";
+import { TextCard, type TextCardProps } from "../../textcard/TextCard";
 import { Board } from "../../board/Board";
-import type { Board as JeopardyBoard } from "../../../types/Jeopardy";
+import type { Board as JeopardyBoard, JeopardyPlayer } from "../../../types/Jeopardy";
+// import { PlayerControls } from "./PlayerControls";
 import "./PlayerPanel.css"
+import { PlayerList } from "./PlayerList";
 
-const dummyBoard: JeopardyBoard = {
-    categories: [
-        {
-            name: "Lorem ipsum dolor sit amet consectetur adipisicing elit. Vero tempore illo eligendi maxime aliquam incidunt sed ut veniam, ratione sapiente! Modi deserunt qui provident ratione, voluptas quia dolorem veniam minima!",
-            questions: Array.from({ length: 2 }, () => ({
-                answered: false,
-                dailyDouble: false,
-                pointValue: Math.round(Math.random() * 1000 + 100),
-                question: {
-                    content: "Question",
-                    answer: "Answer"
-                }
-            }))
-        },
-        {
-            name: "Lorem ipsum dolor sit amet consectetur adipisicing elit. Corporis fugiat ex fuga cupiditate magni id distinctio possimus iusto tempora, maxime accusantium exercitationem labore. Blanditiis id quisquam debitis, doloremque deleniti aliquam.",
-            questions: Array.from({ length: 5 }, () => ({
-                answered: false,
-                dailyDouble: false,
-                pointValue: Math.round(Math.random() * 1000 + 100),
-                question: {
-                    content: "Question",
-                    answer: "Answer"
-                }
-            }))
-        },
-        ...Array.from({ length: 4 }, (_, i: number) => ({
-            name: `Category ${i}`,
-            questions: Array.from({ length: 5 }, () => ({
-                answered: false,
-                dailyDouble: false,
-                pointValue: Math.round(Math.random() * 1000 + 100),
-                question: {
-                    content: "Question",
-                    answer: "Answer"
-                }
-            }))
-        }))
-    ]
+// although this is a union, TypeScript inherits the failures of JavaScript
+// and cannot distinguish between interfaces if both props have the same keys.
+// the alternative is checking based on inner properties of the types: 
+// which creates rigidity in the code and violates the abstraction 
+// or use a discriminant and check the type like a string.
+// 
+// i chose a hybrid approach. this is better as it retains the abstraction but prevents discriminant mismatch
+// if it has both, the text card is ignored
+interface PlayerPanelProps {
+    display: { board: JeopardyBoard } | { textCard: TextCardProps }
+    players: JeopardyPlayer[]
 }
 
-export interface PlayerPanelProps {
-
-}
-
-export function PlayerPanel({ }: PlayerPanelProps) {
-    const [showBoard, setShowBoard] = useState(true);
-    const [jeopardyBoard, setBoard] = useState(dummyBoard);
-    const longText = "Lorem ipsum dolor sit amet, consectetur adipisicing elit. Consectetur temporibus pariatur laboriosam blanditiis totam voluptas debitis nulla dolorem, exercitationem aliquam doloribus ad non, maxime amet! Accusamus iusto delectus nesciunt. Excepturi.";
+export function PlayerPanel({ display, players }: PlayerPanelProps) {
     return (
         <div className="player-panel">
             <div className="game-area">
                 {
-                    showBoard ? <Board board={jeopardyBoard} />
-                        : <TextCard title={longText}>
-                            <div>{longText}{longText}{longText}{longText}{longText}{longText}{longText}{longText}{longText}{longText}</div>
-                        </TextCard>
+                    ("board" in display)
+                        ? <Board board={display.board as JeopardyBoard} />
+                        : <TextCard {...(display.textCard as TextCardProps)}></TextCard>
                 }
             </div>
-            <div className="player-controls">
-                <button onClick={() => setShowBoard(!showBoard)}>Toggle</button>
-                <button onClick={() => setBoard(b => randomValue(b))}>Re-render</button>
-            </div>
+            <PlayerList players={players} />
+            {/* <PlayerControls /> */}
         </div>
     )
-}
-
-// sample test to show how all the objects will re-render when the collection gets updated
-function randomValue(jeopardy: JeopardyBoard): JeopardyBoard {
-    let clone: JeopardyBoard = JSON.parse(JSON.stringify(jeopardy));
-    clone
-        .categories
-        .forEach(c =>
-            c.questions
-                .forEach(q => { // we use some extremely large value to test overflow 
-                    q.pointValue = Math.round(Math.random() * 10_000_000 + 1_000_000);
-                })
-        );
-    return clone;
 }

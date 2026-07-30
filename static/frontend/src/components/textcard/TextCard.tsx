@@ -3,7 +3,7 @@ import "./TextCard.css"
 
 export interface TextCardProps {
     title: string,
-    children: ReactNode,
+    children?: ReactNode,
 }
 
 export function TextCard({ title, children }: TextCardProps) {

@@ -30,3 +30,9 @@ export interface JeopardyConfig {
     boards: Board[],
     final_jeopardy: FinalJeopardy,
 }
+
+export interface JeopardyPlayer {
+    points: number,
+    name: string,
+    buzzed: boolean,
+}

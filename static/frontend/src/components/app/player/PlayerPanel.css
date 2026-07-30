@@ -25,6 +25,45 @@
     background-color: var(--background-color);
 }
 
+/* we use vw here bc it is not crucial
+   to see all players and their points
+   like how we want to see most of the game board
+*/
+
+.player-list {
+    /* remove ul defaults */
+    padding: 0.5vw;
+    list-style: none;
+
+    display: flex;
+    flex-direction: row;
+    justify-content: space-evenly;
+    gap: 1vw;
+
+    overflow: auto;
+}
+
+.player-card {
+    padding: 0.5em 1em;
+    flex: 1;
+    text-align: center;
+    border: 4px solid var(--font-color);
+
+    /* prevent word wrap, overflow instead */
+    min-width: max-content;
+    transition: box-shadow ease-in-out 250ms;
+}
+
+.player-card-name {
+    font-size: 1vw;
+}
+
+.player-card-points {
+    color: var(--font-color);
+    font-size: 1.5vw;
+    font-family: var(--question-points-font-family);
+}
+
 .player-controls {
     /* temporary */
     min-height: 10vh;
