@@ -12,8 +12,12 @@
 
     --category-font-family: 'Impact';
     --question-points-font-family: 'Impact';
+    --player-name-font-family: 'Impact';
+    --player-points-font-family: 'Impact';
     --text-card-title-font-family: 'Times New Roman';
     --text-card-content-font-family: 'Times New Roman';
+    --player-list-background-color: var(--accent-background-color);
+    --player-card-background-color: var(--background-color);
 
     /* all elements are border-box for more predictable sizing */
     box-sizing: border-box;
@@ -57,11 +61,10 @@ body {
 }
 
 #app-header {
-    font-size: 1.5vw;
     color: var(--font-color);
     text-transform: uppercase;
     letter-spacing: 1em;
-    padding: 0.75vw 1.5vw;
+    padding: 0.5em 1em;
     min-height: min-content;
 
     background-color: var(--accent-background-color);
@@ -69,8 +72,7 @@ body {
 }
 
 #app-main {
-    padding: 10px;
-
+    padding: 20px;
     /* needed to scale child nodes */
     display: flex;
     flex-direction: column;
