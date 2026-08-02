@@ -1,0 +1,50 @@
+.login {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: var(--login-font);
+    text-align: center;
+    background-color: var(--accent-background-color);
+    max-width: max-content;
+    max-height: max-content;
+    padding: 2em 4em;
+
+    /* unavoidable, centered, login page */
+    position: fixed;
+    margin: auto;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+}
+
+.login-title {
+    text-transform: uppercase;
+    letter-spacing: 1em;
+    /* terrible, but we have to add padding to mirror the extra 
+       letter spacing that is created after the last letter */
+    padding-left: 1em;
+    padding-bottom: 1em;
+}
+
+.login-form {
+    text-align: center;
+    max-width: min-content;
+}
+
+.login-text-input {
+    color: var(--font-color);
+    background-color: transparent;
+    border: 1px solid var(--font-color);
+    border-radius: 0.5em;
+    padding: 0.5em;
+    font-size: medium;
+}
+
+.login-form * {
+    margin: 0.25em 0;
+}
+
+.login-error-msg {
+    color: red;
+}

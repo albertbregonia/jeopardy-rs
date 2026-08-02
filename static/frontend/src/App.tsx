@@ -1,5 +1,6 @@
 import { PlayerPanel } from "./components/app/player/PlayerPanel";
 import type { Board, JeopardyPlayer } from "./types/Jeopardy";
+import { Login } from "./components/app/login/Login";
 import './App.css'
 
 const dummyBoard: Board = {
@@ -27,6 +28,7 @@ function App() {
     return (
         <>
             <header id="app-header">Jeopardy</header>
+            <Login />
             <main id="app-main">
                 <PlayerPanel display={{ board: dummyBoard }} players={dummyPlayers} />
             </main>
