@@ -1,4 +1,4 @@
-// derived from the rust models
+// derived from the rust models in the backend
 
 export interface Question {
     content: string,

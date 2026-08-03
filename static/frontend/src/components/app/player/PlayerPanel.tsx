@@ -1,6 +1,6 @@
 import { TextCard, type TextCardProps } from "../../textcard/TextCard";
 import { Board } from "../../board/Board";
-import type { Board as JeopardyBoard, JeopardyPlayer } from "../../../types/Jeopardy";
+import type { Board as JeopardyBoard, JeopardyPlayer } from "../../../jeopardy-rs-sdk/game/Jeopardy";
 // import { PlayerControls } from "./PlayerControls";
 import "./PlayerPanel.css"
 import { PlayerList } from "./PlayerList";

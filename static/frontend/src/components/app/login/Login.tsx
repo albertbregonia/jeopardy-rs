@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import "../login/Login.css"
+import "./Login.css"
 
 export interface LoginProps {
 

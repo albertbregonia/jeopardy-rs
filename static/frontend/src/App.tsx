@@ -1,5 +1,5 @@
 import { PlayerPanel } from "./components/app/player/PlayerPanel";
-import type { Board, JeopardyPlayer } from "./types/Jeopardy";
+import type { Board, JeopardyPlayer } from "./jeopardy-rs-sdk/game/Jeopardy";
 import { Login } from "./components/app/login/Login";
 import './App.css'
 

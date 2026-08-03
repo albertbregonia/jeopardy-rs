@@ -1,4 +1,4 @@
-import type { Board } from "../../types/Jeopardy"
+import type { Board } from "../../jeopardy-rs-sdk/game/Jeopardy"
 import { Category } from "../category/Category"
 import "./Board.css"
 
