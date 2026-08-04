@@ -2,9 +2,9 @@ curl -i -X POST http://localhost:8080/lobbies \
   -H "Content-Type: application/json" \
   -d '
 {
-    "lobby_name": "test",
-    "lobby_password": "password",
-    "host_password": "host_password",
+    "lobbyName": "test",
+    "lobbyPassword": "password",
+    "hostPassword": "host_password",
     "config": {
         "boards": [
             {
@@ -13,8 +13,8 @@ curl -i -X POST http://localhost:8080/lobbies \
                         "name": "test",
                         "questions": [
                             {
-                                "point_value": 0,
-                                "daily_double": false,
+                                "pointValue": 0,
+                                "dailyDouble": false,
                                 "answered": false,
                                 "question": {
                                     "content": "test_content",
@@ -26,7 +26,7 @@ curl -i -X POST http://localhost:8080/lobbies \
                 ]
             }
         ],
-        "final_jeopardy": {
+        "finalJeopardy": {
             "hint": "hint",
             "question": {
                 "content": "final_jeopardy",

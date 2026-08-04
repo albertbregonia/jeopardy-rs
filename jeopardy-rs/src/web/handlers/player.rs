@@ -26,6 +26,7 @@ use crate::{
 
 /// Helper struct to encapsulate creds for a login request
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LoginCredentials {
     pub lobby_id: String,
     pub lobby_password: String,
@@ -57,6 +58,7 @@ fn is_valid_login_request(
 // variants of what can be sent by the player over the websocket
 // note: serialize is required only for tests
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum PlayerRequest {
     Login(LoginCredentials),
     Command(PlayerCommand),
@@ -64,6 +66,7 @@ pub enum PlayerRequest {
 
 // response type for player
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PlayerResponse {
     #[serde(serialize_with = "serialize_result")]
     pub result: Result<PlayerCommandResponse, String>,

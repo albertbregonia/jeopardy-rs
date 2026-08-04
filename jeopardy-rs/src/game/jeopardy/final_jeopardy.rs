@@ -6,6 +6,7 @@ use crate::game::jeopardy::{JeopardyBoardError, non_empty_trimmed};
 // defines Final Jeopardy as a `Question` with a hint string
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct FinalJeopardy {
     #[serde(deserialize_with = "non_empty_trimmed")]
     hint: String,

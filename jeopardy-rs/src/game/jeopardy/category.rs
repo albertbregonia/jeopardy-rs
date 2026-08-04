@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 // defines a Jeopardy `Category` as a collection of `BoardQuestion`
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Category {
     #[serde(deserialize_with = "non_empty_trimmed")]
     name: String,

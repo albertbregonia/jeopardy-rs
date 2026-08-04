@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// one for the question content and the corresponding answer
 /// This way, no Question ever goes without an answer
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Question {
     #[serde(deserialize_with = "non_empty_trimmed")]
     content: String,

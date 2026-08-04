@@ -16,6 +16,7 @@ pub mod player;
 
 /// A unified type to combine requests when interfacing with a Game trait
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum JeopardyCommand {
     Host {
         host_password: String,
@@ -29,6 +30,7 @@ pub enum JeopardyCommand {
 
 /// A unified type to combine responses when interfacing with a Game trait
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum JeopardyCommandResponse {
     Host(HostCommandResponse),
     Player(PlayerCommandResponse),

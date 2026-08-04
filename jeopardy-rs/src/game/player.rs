@@ -9,6 +9,7 @@ use crate::game::commands::player::JeopardyDisplayState;
 
 /// `JeopardyPlayerEvent` is content to be sent to the player
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum JeopardyPlayerEvent {
     Display(JeopardyDisplayState),
     PointsUpdate(i32),

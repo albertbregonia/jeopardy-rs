@@ -9,6 +9,7 @@ pub struct TextCard {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum JeopardyDisplayState {
     Question(TextCard),
     Answer(TextCard),
@@ -20,6 +21,7 @@ pub enum JeopardyDisplayState {
 
 /// Enum of commands any player or the host of the Jeopardy game can send.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum PlayerCommand {
     Buzz,
     Refresh,
@@ -36,6 +38,7 @@ pub enum PlayerCommand {
 /// Otherwise, the variant mirrors the command:
 /// ie. `PlayerCommand::GetPoints` maps to `HostCommandResponse::GetPoints(i32)`
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum PlayerCommandResponse {
     Success,
     Refresh(JeopardyDisplayState),

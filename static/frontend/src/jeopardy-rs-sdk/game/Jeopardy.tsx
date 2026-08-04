@@ -28,7 +28,7 @@ export interface FinalJeopardy {
 
 export interface JeopardyConfig {
     boards: Board[],
-    final_jeopardy: FinalJeopardy,
+    finalJeopardy: FinalJeopardy,
 }
 
 export interface JeopardyPlayer {

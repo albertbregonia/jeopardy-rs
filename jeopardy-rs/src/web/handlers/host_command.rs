@@ -14,12 +14,14 @@ use crate::{
 use stagecrew::manager::{ManagerEntry, ManagerError};
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HostRequest {
     pub lobby_password: String,
     pub command: JeopardyCommand,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HostResponse {
     pub request_id: String,
     #[serde(serialize_with = "serialize_result")]

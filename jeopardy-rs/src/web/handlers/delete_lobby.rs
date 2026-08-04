@@ -18,6 +18,7 @@ use crate::{
 };
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteLobbyRequest {
     pub force: bool, // set true to delete even if players are in the game
     pub lobby_password: String,
@@ -25,6 +26,7 @@ pub struct DeleteLobbyRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteLobbyResponse {
     request_id: String,
     error: Option<String>,

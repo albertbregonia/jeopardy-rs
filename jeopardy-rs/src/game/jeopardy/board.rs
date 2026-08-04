@@ -9,6 +9,7 @@ use crate::server::TestDefault;
 // defines a Jeopardy game board as a collection of `Category`
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Board {
     #[serde(deserialize_with = "non_empty_vec")]
     categories: Vec<Category>,

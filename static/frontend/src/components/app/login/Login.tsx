@@ -1,5 +1,37 @@
 import { useRef, useState } from "react"
 import "./Login.css"
+import { createLobby } from "../../../jeopardy-rs-sdk/lobby/CreateLobby";
+
+// dummy data for the CreateLobbyRequest
+const TEST_JEOPARDY_CONFIG = {
+    "boards": [
+        {
+            "categories": [
+                {
+                    "name": "test",
+                    "questions": [
+                        {
+                            "pointValue": 0,
+                            "dailyDouble": false,
+                            "answered": false,
+                            "question": {
+                                "content": "test_content",
+                                "answer": "test_answer"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "finalJeopardy": {
+        "hint": "hint",
+        "question": {
+            "content": "final_jeopardy",
+            "answer": "answer"
+        }
+    }
+};
 
 export interface LoginProps {
 
@@ -8,7 +40,7 @@ export interface LoginProps {
 export function Login({ }: LoginProps) {
     const [showHostPasswordField, setShowHostPasswordField] = useState(false);
     const [createLobbyRequest, setCreateLobbyRequest] = useState({
-        lobbyId: "",
+        lobbyName: "",
         lobbyPassword: "",
         hostPassword: "",
         username: ""
@@ -29,6 +61,7 @@ export function Login({ }: LoginProps) {
     // show/hide password checkbox
     const lobbyPasswordInputRef = useRef<HTMLInputElement>(null);
     const hostPasswordInputRef = useRef<HTMLInputElement>(null);
+    const loginResponseRef = useRef<HTMLInputElement>(null);
     function toggleShowPasswords(e: React.ChangeEvent<HTMLInputElement>) {
         const type = e.target.checked ? "text" : "password";
         lobbyPasswordInputRef.current!.type = type;
@@ -38,42 +71,89 @@ export function Login({ }: LoginProps) {
     return (
         <div className="login">
             <h1 className="login-title">Jeopardy</h1>
-            <form className="login-form" onSubmit={handleLoginDialog}>
-                <div className="login-error-msg">Error during login.</div>
+            <form className="login-form" onSubmit={e => e.preventDefault()}>
+                <div ref={loginResponseRef} className="login-response"></div>
                 <label>
                     Username
-                    <input className="login-text-input" type="text" name="username" placeholder="Username" value={createLobbyRequest.username} onChange={handleInput} />
+                    <input required={true}
+                        className="login-text-input"
+                        type="text"
+                        name="username"
+                        placeholder="Username"
+                        value={createLobbyRequest.username}
+                        onChange={handleInput}
+                    />
                 </label>
                 <label>
                     Lobby Name
-                    <input className="login-text-input" type="text" name="lobbyId" placeholder="Lobby Name" value={createLobbyRequest.lobbyId} onChange={handleInput} />
+                    <input required={true}
+                        className="login-text-input"
+                        type="text"
+                        name="lobbyName"
+                        placeholder="Lobby Name"
+                        value={createLobbyRequest.lobbyName}
+                        onChange={handleInput}
+                    />
                 </label>
                 <label>
                     Lobby Password
-                    <input className="login-text-input" ref={lobbyPasswordInputRef} type="password" placeholder="Lobby Password" name="lobbyPassword" value={createLobbyRequest.lobbyPassword} onChange={handleInput} />
+                    <input required={true}
+                        className="login-text-input"
+                        ref={lobbyPasswordInputRef}
+                        type="password"
+                        placeholder="Lobby Password"
+                        name="lobbyPassword"
+                        value={createLobbyRequest.lobbyPassword}
+                        onChange={handleInput}
+                    />
                     <label>
-                        <input type="checkbox" onChange={toggleShowPasswords}></input>
+                        <input
+                            type="checkbox"
+                            onChange={toggleShowPasswords}
+                        />
                         Show Password
                     </label>
                     <br />
                 </label>
                 <label hidden={!showHostPasswordField} >
                     Host Password
-                    <input className="login-text-input" ref={hostPasswordInputRef} type="password" name="hostPassword" placeholder="Host Password" value={createLobbyRequest.hostPassword} onChange={handleInput} />
+                    <input required={showHostPasswordField}
+                        className="login-text-input"
+                        ref={hostPasswordInputRef}
+                        type="password"
+                        name="hostPassword"
+                        placeholder="Host Password"
+                        value={createLobbyRequest.hostPassword}
+                        onChange={handleInput}
+                    />
                 </label>
-                <input type="submit" name="join-lobby" value="Join Lobby" onClick={() => {
-                    setShowHostPasswordField(false);
-                }} />
-                <input type="submit" name="create-lobby" value="Create Lobby" onClick={() => {
-                    if (!showHostPasswordField) {
-                        setShowHostPasswordField(true);
-                    }
-                }} />
+                <input type="submit"
+                    name="join-lobby"
+                    value="Join Lobby"
+                    onClick={() => setShowHostPasswordField(false)}
+                />
+                <input type="submit"
+                    name="create-lobby"
+                    value="Create Lobby"
+                    onClick={async () => {
+                        if (!showHostPasswordField) {
+                            setShowHostPasswordField(true);
+                        } else {
+                            const { requestId, error } = await createLobby({
+                                ...createLobbyRequest,
+                                config: TEST_JEOPARDY_CONFIG
+                            });
+                            const loginResponse = loginResponseRef.current!;
+                            if (error) {
+                                loginResponse.style = `color: red`;
+                                loginResponse.textContent = `${error} (requestId: ${requestId})`;
+                            } else {
+                                loginResponse.style = `color: green`;
+                                loginResponse.textContent = `Lobby successfully created`;
+                            }
+                        }
+                    }} />
             </form>
-        </div >
+        </div>
     )
-}
-
-function handleLoginDialog(e: React.SubmitEvent) {
-    e.preventDefault();
 }

@@ -16,6 +16,7 @@ use crate::web::handlers::delete_lobby::DeleteLobbyRequest;
 use crate::web::handlers::validators::CredsValidator;
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateLobbyRequest {
     pub lobby_name: String,
     pub lobby_password: String,
@@ -24,6 +25,7 @@ pub struct CreateLobbyRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateLobbyResponse {
     request_id: String,
     pub error: Option<String>,

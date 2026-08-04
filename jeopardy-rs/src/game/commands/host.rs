@@ -6,6 +6,7 @@ use crate::game::BuzzerLatency;
 
 /// Enum of commands the host or admin of the Jeopardy game can send.
 #[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum HostCommand {
     // may return JeopardyError - may be invalid board index
     ShowBoard {
@@ -48,6 +49,7 @@ pub enum HostCommand {
 /// Otherwise, the variant mirrors the command:
 /// ie. `HostCommand::GetAnswer` maps to `HostCommandResponse::GetAnswer(String)`
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum HostCommandResponse {
     Success,
     GetAnswer(String),
