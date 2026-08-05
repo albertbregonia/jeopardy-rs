@@ -4,7 +4,6 @@ use crate::game::jeopardy::{
     JeopardyBoardError, board::Board, final_jeopardy::FinalJeopardy, non_empty_vec,
 };
 
-// TODO:
 /// `JeopardyConfig` is a top level struct encapsulating
 /// the entirety of the Jeopardy game configuration (board, final jeopardy, etc)
 /// not including state (points, daily doubles, etc.)
@@ -102,7 +101,7 @@ mod jeopardy_config_tests {
         let final_jeopardy = FinalJeopardy::test_default();
         let json = json!({
             "boards": boards.clone(),
-            "final_jeopardy": final_jeopardy.clone(),
+            "finalJeopardy": final_jeopardy.clone(),
         });
 
         // WHEN
@@ -132,7 +131,7 @@ mod jeopardy_config_tests {
         // GIVEN
         let json = json!({
             "boards": [],
-            "final_jeopardy": FinalJeopardy::test_default(),
+            "finalJeopardy": FinalJeopardy::test_default(),
         });
 
         // WHEN

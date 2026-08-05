@@ -3,7 +3,6 @@ use crate::game::jeopardy::question::Question;
 use crate::server::TestDefault;
 use serde::{Deserialize, Serialize};
 
-// TODO:
 /// Defines a standard Jeopardy board question as a wrapper over a `Question`
 /// but includes question point value, daily double, etc.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
