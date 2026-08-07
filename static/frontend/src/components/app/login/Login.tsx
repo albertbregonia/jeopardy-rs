@@ -1,6 +1,7 @@
 import { useRef, useState } from "react"
-import "./Login.css"
 import { createLobby } from "../../../jeopardy-rs-sdk/lobby/CreateLobby";
+import { joinLobby } from "../../../jeopardy-rs-sdk/lobby/JoinLobby";
+import "./Login.css"
 
 // dummy data for the CreateLobbyRequest
 const TEST_JEOPARDY_CONFIG = {
@@ -130,7 +131,22 @@ export function Login({ }: LoginProps) {
                 <input type="submit"
                     name="join-lobby"
                     value="Join Lobby"
-                    onClick={() => setShowHostPasswordField(false)}
+                    onClick={async () => {
+                        setShowHostPasswordField(false);
+                        try {
+                            const playerConn = await joinLobby({
+                                ...createLobbyRequest,
+                                lobbyId: createLobbyRequest.lobbyName,
+                            });
+                        } catch (e: unknown) {
+                            const loginResponseElement = loginResponseRef.current!;
+                            loginResponseElement.style.color = `red`;
+                            loginResponseElement.textContent = `Login failed: ` +
+                                ((e instanceof Error)
+                                    ? e.message
+                                    : `Generic failure`);
+                        }
+                    }}
                 />
                 <input type="submit"
                     name="create-lobby"

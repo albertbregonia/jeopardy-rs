@@ -20,5 +20,6 @@ export async function createLobby(request: CreateLobbyRequest): Promise<CreateLo
         headers: { "Content-Type": 'application/json' },
         body: JSON.stringify(request)
     });
+    // TODO: error handling
     return await rawResponse.json();
 }

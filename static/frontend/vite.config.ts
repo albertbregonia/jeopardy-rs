@@ -9,7 +9,8 @@ export default defineConfig({
       // proxy all backend requests from vite
       "/lobbies": {
         target: "http://localhost:8080",
-        changeOrigin: true
+        changeOrigin: true,
+        ws: true,
       }
     }
   }
