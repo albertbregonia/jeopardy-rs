@@ -1,4 +1,4 @@
-import type { JeopardyPlayer } from "../../../jeopardy-rs-sdk/game/Jeopardy";
+import type { JeopardyPlayer } from "../../../jeopardy-rs-sdk/game/JeopardyPlayer";
 
 interface PlayerListProps {
     players: JeopardyPlayer[]
