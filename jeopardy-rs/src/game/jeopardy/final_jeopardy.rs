@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::game::jeopardy::question::Question;
 use crate::game::jeopardy::{JeopardyBoardError, non_empty_trimmed};
 
 // defines Final Jeopardy as a `Question` with a hint string
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct FinalJeopardy {
     #[serde(deserialize_with = "non_empty_trimmed")]
     hint: String,

@@ -138,6 +138,7 @@ export function Login({ }: LoginProps) {
                                 ...createLobbyRequest,
                                 lobbyId: createLobbyRequest.lobbyName,
                             });
+                            playerConn.websocket.close();
                         } catch (e: unknown) {
                             const loginResponseElement = loginResponseRef.current!;
                             loginResponseElement.style.color = `red`;

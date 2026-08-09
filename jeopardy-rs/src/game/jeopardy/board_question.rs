@@ -2,11 +2,13 @@ use crate::game::jeopardy::question::Question;
 #[cfg(test)]
 use crate::server::TestDefault;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Defines a standard Jeopardy board question as a wrapper over a `Question`
 /// but includes question point value, daily double, etc.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct BoardQuestion {
     // i think it's funny as hell to make this an i32
     // meaning you could get an answer wrong to subtract negative points (gain points) ;)

@@ -4,12 +4,14 @@ use serde::Serialize;
 use stagecrew::player::Player;
 use thiserror::Error;
 use tokio::sync::mpsc;
+use ts_rs::TS;
 
 use crate::game::commands::player::JeopardyDisplayState;
 
 /// `JeopardyPlayerEvent` is content to be sent to the player
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum JeopardyPlayerEvent {
     Display(JeopardyDisplayState),
     PointsUpdate(i32),

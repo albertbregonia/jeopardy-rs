@@ -1,16 +1,5 @@
-import type { JeopardyConfig } from "../game/Jeopardy";
-
-export interface CreateLobbyRequest {
-    lobbyName: string,
-    lobbyPassword: string,
-    hostPassword: string,
-    config: JeopardyConfig,
-}
-
-export interface CreateLobbyResponse {
-    requestId: string,
-    error: string | null
-}
+import type { CreateLobbyRequest } from "../generated/CreateLobbyRequest";
+import type { CreateLobbyResponse } from "../generated/CreateLobbyResponse";
 
 const CREATE_LOBBY_PATH = "/lobbies"
 

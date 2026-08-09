@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
@@ -13,15 +14,17 @@ use crate::{
 };
 use stagecrew::manager::{ManagerEntry, ManagerError};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct HostRequest {
     pub lobby_password: String,
     pub command: JeopardyCommand,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct HostResponse {
     pub request_id: String,
     #[serde(serialize_with = "serialize_result")]

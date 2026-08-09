@@ -1,0 +1,4 @@
+[env]
+# set global export directory for generated typescript types from rust
+# this ensures that the rust backend is the single source of truth for the frontend sdk
+TS_RS_EXPORT_DIR = { value = "static/frontend/src/jeopardy-rs-sdk/generated", relative = true }

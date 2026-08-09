@@ -2,14 +2,16 @@ use std::collections::HashSet;
 
 use crate::game::jeopardy::{JeopardyBoardError, category::Category, non_empty_vec};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 #[cfg(test)]
 use crate::server::TestDefault;
 
 // defines a Jeopardy game board as a collection of `Category`
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct Board {
     #[serde(deserialize_with = "non_empty_vec")]
     categories: Vec<Category>,

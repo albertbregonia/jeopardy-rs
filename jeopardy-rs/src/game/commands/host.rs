@@ -1,12 +1,14 @@
 use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::game::BuzzerLatency;
 
 /// Enum of commands the host or admin of the Jeopardy game can send.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, TS)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(export)]
 pub enum HostCommand {
     // may return JeopardyError - may be invalid board index
     ShowBoard {
@@ -48,11 +50,13 @@ pub enum HostCommand {
 /// Most of them will send `HostCommandResponse::Success` which is equivalently `Ok(())`.
 /// Otherwise, the variant mirrors the command:
 /// ie. `HostCommand::GetAnswer` maps to `HostCommandResponse::GetAnswer(String)`
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum HostCommandResponse {
     Success,
     GetAnswer(String),
     UpdatePoints(i32),
+    #[ts(type = "array")]
     GetBuzzerQueue(VecDeque<BuzzerLatency>),
 }

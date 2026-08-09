@@ -1,3 +1,4 @@
+import type { PlayerCommand } from "../generated/PlayerCommand";
 import type { LoginCredentials } from "./JoinLobby";
 
 // derived from rust variant in backend
@@ -14,9 +15,6 @@ export interface PlayerResponse {
     result: PlayerCommandResponse | string
 }
 
-// TODO: these are placeholder, we need to evaluate
-// the best way to create rust enums in the frontend
-export interface PlayerCommand { }
 export interface PlayerCommandResponse { }
 
 export class PlayerConn {

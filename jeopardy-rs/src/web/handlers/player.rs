@@ -9,6 +9,7 @@ use stagecrew::{
 };
 use thiserror::Error;
 use tokio::{sync::mpsc, time::timeout};
+use ts_rs::TS;
 
 // we consider this file to be part of the "top level" handlers
 // as this defines the websocket API for handling players.
@@ -25,8 +26,9 @@ use crate::{
 };
 
 /// Helper struct to encapsulate creds for a login request
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct LoginCredentials {
     pub lobby_id: String,
     pub lobby_password: String,
@@ -57,16 +59,18 @@ fn is_valid_login_request(
 
 // variants of what can be sent by the player over the websocket
 // note: serialize is required only for tests
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum PlayerRequest {
     Login(LoginCredentials),
     Command(PlayerCommand),
 }
 
 // response type for player
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct PlayerResponse {
     #[serde(serialize_with = "serialize_result")]
     pub result: Result<PlayerCommandResponse, String>,

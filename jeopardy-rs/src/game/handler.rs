@@ -6,6 +6,7 @@ use stagecrew::{
     player::{Player, ReadPlayerCollection, player_map::PlayerMap},
 };
 use tokio::time::Instant;
+use ts_rs::TS;
 
 use crate::game::{
     JeopardyCommand, JeopardyCommandResponse, JeopardyError,
@@ -44,9 +45,11 @@ pub struct BuzzerEntry {
 }
 
 /// returns the time difference from the fastest buzzer, 0 if fastest
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
 pub struct BuzzerLatency {
     id: String,
+    #[ts(type = "{ secs: number; nanos: number }")] // no dynamic, inferred definition
     latency: Duration,
 }
 

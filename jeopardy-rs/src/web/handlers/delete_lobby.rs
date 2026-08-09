@@ -9,6 +9,7 @@ use stagecrew::{
     manager::{ManagerEntry, ManagerError, PasswordProtectedLobby},
 };
 use tokio::sync::RwLockWriteGuard;
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{
@@ -17,16 +18,18 @@ use crate::{
     web::handlers::validators::CredsValidator,
 };
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct DeleteLobbyRequest {
     pub force: bool, // set true to delete even if players are in the game
     pub lobby_password: String,
     pub host_password: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct DeleteLobbyResponse {
     request_id: String,
     error: Option<String>,

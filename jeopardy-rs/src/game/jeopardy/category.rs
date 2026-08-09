@@ -4,11 +4,13 @@ use crate::game::jeopardy::{
 #[cfg(test)]
 use crate::server::TestDefault;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 // defines a Jeopardy `Category` as a collection of `BoardQuestion`
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct Category {
     #[serde(deserialize_with = "non_empty_trimmed")]
     name: String,

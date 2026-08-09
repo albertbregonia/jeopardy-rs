@@ -1,15 +1,18 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::game::jeopardy::board::Board;
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, TS)]
+#[ts(export)]
 pub struct TextCard {
     pub title: String,
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum JeopardyDisplayState {
     Question(TextCard),
     Answer(TextCard),
@@ -20,8 +23,9 @@ pub enum JeopardyDisplayState {
 }
 
 /// Enum of commands any player or the host of the Jeopardy game can send.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum PlayerCommand {
     Buzz,
     Refresh,
@@ -37,8 +41,9 @@ pub enum PlayerCommand {
 /// Most of them will send `PlayerCommandResponse::Success` which is equivalently `Ok(())`.
 /// Otherwise, the variant mirrors the command:
 /// ie. `PlayerCommand::GetPoints` maps to `HostCommandResponse::GetPoints(i32)`
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum PlayerCommandResponse {
     Success,
     Refresh(JeopardyDisplayState),

@@ -1,11 +1,13 @@
 use crate::game::jeopardy::{JeopardyBoardError, non_empty_trimmed};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Defines a simple `Question` as a pair of strings
 /// one for the question content and the corresponding answer
 /// This way, no Question ever goes without an answer
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct Question {
     #[serde(deserialize_with = "non_empty_trimmed")]
     content: String,

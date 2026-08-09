@@ -10,13 +10,15 @@ use thiserror::Error;
 
 mod handler;
 pub use handler::*;
+use ts_rs::TS;
 pub mod commands;
 pub mod jeopardy;
 pub mod player;
 
 /// A unified type to combine requests when interfacing with a Game trait
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(export)]
 pub enum JeopardyCommand {
     Host {
         host_password: String,
@@ -29,8 +31,9 @@ pub enum JeopardyCommand {
 }
 
 /// A unified type to combine responses when interfacing with a Game trait
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum JeopardyCommandResponse {
     Host(HostCommandResponse),
     Player(PlayerCommandResponse),

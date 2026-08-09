@@ -7,6 +7,7 @@ use stagecrew::manager::PasswordProtectedLobby;
 use stagecrew::player::player_map::PlayerMap;
 use tokio::time::sleep;
 use tracing::Instrument;
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::game::Jeopardy;
@@ -15,8 +16,9 @@ use crate::server::{CredsValidatorGeneric, JeopardyServerStateGeneric, ManagerGe
 use crate::web::handlers::delete_lobby::DeleteLobbyRequest;
 use crate::web::handlers::validators::CredsValidator;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct CreateLobbyRequest {
     pub lobby_name: String,
     pub lobby_password: String,
@@ -24,8 +26,9 @@ pub struct CreateLobbyRequest {
     pub config: JeopardyConfig,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct CreateLobbyResponse {
     request_id: String,
     pub error: Option<String>,
