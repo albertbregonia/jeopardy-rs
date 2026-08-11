@@ -91,7 +91,7 @@
 
 .buzzer-button {
     /* text styling */
-    text-shadow: 0 0.25em 0.25em #000;
+    text-shadow: 0 0.1em 0.1em #000;
     color: var(--font-color);
     font-size: 2rem;
     font-family: var(--buzzer-button-font-family);

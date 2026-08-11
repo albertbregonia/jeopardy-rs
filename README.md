@@ -1,6 +1,8 @@
 # jeopardy-rs
 `jeopardy-rs` is a project built using [`tokio`](https://tokio.rs/) and [`axum`](https://github.com/tokio-rs/axum) for web functionality and is designed to mimic the [Jackbox](https://www.jackboxgames.com/) style of party games. Websockets are used with an actor-model based [lobby handler](https://github.com/albertbregonia/jeopardy-rs/blob/main/stagecrew/src/lobby/actor_lobby.rs) to ingest concurrent updates to game state and broadcast events to players.
 
+![jeopardy-rs main UI as of 08/10/2026](./ui.png)
+
 # features
 - multi-lobby support on a single instance allowing different groups to play their own respective game
 - custom board support allowing users to create and use their own custom questions, categories and point values
