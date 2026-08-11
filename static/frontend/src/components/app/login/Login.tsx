@@ -34,11 +34,8 @@ const TEST_JEOPARDY_CONFIG = {
     }
 };
 
-export interface LoginProps {
-
-}
-
-export function Login({ }: LoginProps) {
+export function Login() {
+    const [loggedIn, setLoggedIn] = useState(false);
     const [showHostPasswordField, setShowHostPasswordField] = useState(false);
     const [createLobbyRequest, setCreateLobbyRequest] = useState({
         lobbyName: "",
@@ -69,8 +66,10 @@ export function Login({ }: LoginProps) {
         hostPasswordInputRef.current!.type = type;
     }
 
+    // onSubmit is a dummy call here because we require the player to select login or create
+    // we could default, but the friction here is intentional
     return (
-        <div className="login">
+        <div className="login" hidden={loggedIn}>
             <h1 className="login-title">Jeopardy</h1>
             <form className="login-form" onSubmit={e => e.preventDefault()}>
                 <div ref={loginResponseRef} className="login-response"></div>
@@ -139,6 +138,7 @@ export function Login({ }: LoginProps) {
                                 lobbyId: createLobbyRequest.lobbyName,
                             });
                             playerConn.websocket.close();
+                            setLoggedIn(true);
                         } catch (e: unknown) {
                             const loginResponseElement = loginResponseRef.current!;
                             loginResponseElement.style.color = `red`;

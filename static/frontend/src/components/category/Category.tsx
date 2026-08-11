@@ -1,4 +1,4 @@
-import type { Category } from "../../jeopardy-rs-sdk/game/Jeopardy"
+import type { Category } from "../../jeopardy-rs-sdk/generated/Category"
 import { Cell } from "../cell/Cell"
 import "./Category.css"
 

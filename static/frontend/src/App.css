@@ -20,6 +20,9 @@
     --player-list-background-color: var(--accent-background-color);
     --player-card-background-color: var(--background-color);
 
+    --buzzer-background-color: var(--question-points-color);
+    --buzzer-button-font-family: var(--question-points-font-family);
+    --buzzer-clicked-background-color: var(--background-color);
     /* all elements are border-box for more predictable sizing */
     box-sizing: border-box;
 }
@@ -83,4 +86,9 @@ body {
 
     /* allow shrinking, deletes min-height to root */
     min-height: 0;
+}
+
+/* prevent stylings from overriding the [hidden] attribute */
+[hidden] {
+    display: none !important;
 }

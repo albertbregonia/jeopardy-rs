@@ -1,6 +1,7 @@
 import { PlayerPanel } from "./components/app/player/PlayerPanel";
-import type { Board, JeopardyPlayer } from "./jeopardy-rs-sdk/game/Jeopardy";
 import { Login } from "./components/app/login/Login";
+import type { Board } from "./jeopardy-rs-sdk/generated/Board";
+import type { JeopardyPlayer } from "./jeopardy-rs-sdk/game/JeopardyPlayer";
 import './App.css'
 
 const dummyBoard: Board = {
@@ -30,7 +31,11 @@ function App() {
             <header id="app-header">Jeopardy</header>
             <Login />
             <main id="app-main">
-                <PlayerPanel display={{ board: dummyBoard }} players={dummyPlayers} />
+                <PlayerPanel
+                    display={{ board: dummyBoard }}
+                    players={dummyPlayers}
+                    componentType="buzzer"
+                />
             </main>
         </>
     )

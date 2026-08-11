@@ -73,9 +73,38 @@
 }
 
 .player-controls {
-    /* temporary */
-    min-height: 10vh;
-    border-radius: 10px;
+    /* general styling */
+    position: fixed;
+    width: max-content;
+    height: max-content;
     background-color: var(--accent-background-color);
-    padding: 1rem;
+    padding: 1vw;
+    box-shadow: 0 10px 10px rgba(0, 0, 0, 0.5);
+
+    /* dialog box, centered at the bottom */
+    margin: auto;
+    bottom: 5vh;
+    left: 0;
+    right: 0;
+    border-radius: 1rem;
+}
+
+.buzzer-button {
+    /* text styling */
+    text-shadow: 0 0.25em 0.25em #000;
+    color: var(--font-color);
+    font-size: 2rem;
+    font-family: var(--buzzer-button-font-family);
+
+    /* button styling */
+    border: 1px solid #000;
+    padding: 1rem 2rem;
+    border-radius: 0.5rem;
+    background-color: var(--buzzer-background-color);
+}
+
+/* buzzer clicked css */
+.buzzer-button:active {
+    background-color: var(--buzzer-clicked-background-color);
+    transform: translateY(2px);
 }

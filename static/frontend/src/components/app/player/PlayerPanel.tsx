@@ -1,9 +1,10 @@
 import { TextCard, type TextCardProps } from "../../textcard/TextCard";
 import { Board } from "../../board/Board";
-import type { Board as JeopardyBoard, JeopardyPlayer } from "../../../jeopardy-rs-sdk/game/Jeopardy";
-// import { PlayerControls } from "./PlayerControls";
-import "./PlayerPanel.css"
 import { PlayerList } from "./PlayerList";
+import type { JeopardyPlayer } from "../../../jeopardy-rs-sdk/game/JeopardyPlayer";
+import type { Board as JeopardyBoard } from "../../../jeopardy-rs-sdk/generated/Board";
+import { PlayerControls } from "./PlayerControls";
+import "./PlayerPanel.css"
 
 // although this is a union, TypeScript inherits the failures of JavaScript
 // and cannot distinguish between interfaces if both props have the same keys.
@@ -16,9 +17,10 @@ import { PlayerList } from "./PlayerList";
 interface PlayerPanelProps {
     display: { board: JeopardyBoard } | { textCard: TextCardProps }
     players: JeopardyPlayer[]
+    componentType: "buzzer" | "wager" | "finalJeopardy"
 }
 
-export function PlayerPanel({ display, players }: PlayerPanelProps) {
+export function PlayerPanel({ display, players, componentType }: PlayerPanelProps) {
     return (
         <div className="player-panel">
             <div className="game-area">
@@ -28,8 +30,8 @@ export function PlayerPanel({ display, players }: PlayerPanelProps) {
                         : <TextCard {...(display.textCard as TextCardProps)}></TextCard>
                 }
             </div>
+            <PlayerControls componentType={componentType} />
             <PlayerList players={players} />
-            {/* <PlayerControls /> */}
         </div>
     )
 }
