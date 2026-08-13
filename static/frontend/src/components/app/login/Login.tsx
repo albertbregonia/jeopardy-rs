@@ -169,7 +169,8 @@ export function Login() {
                                 loginResponse.textContent = `Lobby successfully created`;
                             }
                         }
-                    }} />
+                    }}
+                />
             </form>
         </div>
     )

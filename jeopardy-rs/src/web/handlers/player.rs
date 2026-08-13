@@ -67,13 +67,27 @@ pub enum PlayerRequest {
     Command(PlayerCommand),
 }
 
-// response type for player
+// intermediary type; defines all values
+// that can sent back to a player over the websocket
+// note: should mirror `PlayerRequest`
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum PlayerResponseValue {
+    Login,
+    Command(PlayerCommandResponse),
+}
+
+// response type for player requests
+// ensures a guaranteed format for response handling
+// that is standard JSON, language agnostic
 #[derive(Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct PlayerResponse {
+    // TODO: serialize_result is ignored with ts-rs
     #[serde(serialize_with = "serialize_result")]
-    pub result: Result<PlayerCommandResponse, String>,
+    pub result: Result<PlayerResponseValue, String>,
 }
 
 // shallow wrapper over JsonConn to interface the user with the game
@@ -171,7 +185,7 @@ where
 
     // helpers to send responses and errors to the player over the `JsonConn`
 
-    async fn send_response(&mut self, value: PlayerCommandResponse) -> Result<(), InternalError> {
+    async fn send_response(&mut self, value: PlayerResponseValue) -> Result<(), InternalError> {
         self.json_ws
             .send_json(&PlayerResponse { result: Ok(value) })
             .await
@@ -384,7 +398,23 @@ where
             }
             // attempt to join lobby based on request
             match self.join_lobby(creds).await {
-                Ok(receiver) => return Ok(receiver),
+                Ok(receiver) => {
+                    // if we login but cannot send the response (ie. player disconnected), undo the login
+                    let result = self.send_response(PlayerResponseValue::Login).await;
+                    if result.is_err() {
+                        tracing::warn!("Unable to send login response. Reverting join lobby");
+                        // if the leave lobby fails after a successful login, return that error
+                        self.leave_lobby().await.inspect_err(|e| {
+                            // NOTE: this error case is not tested bc i cannot induce an error
+                            // after a sucessful login. in java, the call would be mocked,
+                            // but realistically the ? already guarantees the error is returned
+                            // so i believe it is fine as is
+                            tracing::error!("Unexpected failure when reverting join lobby: {e}")
+                        })?;
+                        result?; // bubble up the original error
+                    }
+                    return Ok(receiver);
+                }
                 Err(e) => match e {
                     PlayerHandlerError::User(e) => {
                         // if we get a user error, inform the user and try again
@@ -436,9 +466,11 @@ where
             Ok(response) => match response {
                 JeopardyCommandResponse::Player(response) => {
                     tracing::info!("Successfully obtained player response: {response:?}");
-                    self.send_response(response).await.inspect_err(|e| {
-                        tracing::error!("Failed to send response to player: {e}")
-                    })?;
+                    self.send_response(PlayerResponseValue::Command(response))
+                        .await
+                        .inspect_err(|e| {
+                            tracing::error!("Failed to send response to player: {e}")
+                        })?;
                 }
                 other => {
                     // can't test this but that's expected
@@ -511,7 +543,7 @@ where
                                     PlayerCommandResponse::GetPoints(points),
                             };
                             tracing::info!("Game event mapped to response: {response:#?}");
-                            self.send_response(response).await?;
+                            self.send_response(PlayerResponseValue::Command(response)).await?;
                             tracing::info!("Game event broadcasted");
                         }
                         None => {
@@ -561,7 +593,7 @@ mod player_conn_tests {
             create_lobby::CreateLobbyRequest,
             player::{
                 InternalError, LeaveCredentials, LoginCredentials, LoginError, PlayerConn,
-                PlayerHandlerError, PlayerRequest, PlayerResponse, UserError,
+                PlayerHandlerError, PlayerRequest, PlayerResponse, PlayerResponseValue, UserError,
             },
             test_util::{
                 TestManagerServerState, lobby_has_player, new_test_manager_server_state,
@@ -599,12 +631,15 @@ mod player_conn_tests {
         let response = PlayerCommandResponse::Success;
 
         // WHEN
-        player_conn.send_response(response.clone()).await.unwrap();
+        player_conn
+            .send_response(PlayerResponseValue::Command(response.clone()))
+            .await
+            .unwrap();
 
         // THEN
         let raw_msg = output_receiver.recv().await.unwrap();
         let expected = serde_json::to_string(&PlayerResponse {
-            result: Ok(response),
+            result: Ok(PlayerResponseValue::Command(response)),
         })
         .unwrap();
         assert_eq!(raw_msg, expected);
@@ -619,7 +654,7 @@ mod player_conn_tests {
 
         // WHEN
         let result = player_conn
-            .send_response(PlayerCommandResponse::Success)
+            .send_response(PlayerResponseValue::Command(PlayerCommandResponse::Success))
             .await;
 
         // THEN
@@ -1197,10 +1232,10 @@ mod player_conn_tests {
         assert!(player_conn.creds.is_none());
     }
 
-    // login_loop() tests
+    // login() tests
 
     #[tokio::test]
-    async fn GIVEN_valid_creds_WHEN_login_loop_THEN_ok() {
+    async fn GIVEN_valid_creds_WHEN_login_THEN_ok() {
         // GIVEN
         let request = CreateLobbyRequest {
             lobby_name: "lobby_name".to_string(),
@@ -1209,7 +1244,7 @@ mod player_conn_tests {
             config: JeopardyConfig::test_default(),
         };
         let state = new_test_server_state(Some(request.clone())).await;
-        let (mut player_conn, input_sender, _) = new_test_player_conn(state, false, 1);
+        let (mut player_conn, input_sender, mut output) = new_test_player_conn(state, false, 1);
 
         // preconditions
         input_sender
@@ -1225,14 +1260,53 @@ mod player_conn_tests {
         let _receiver = player_conn.login(1, Duration::from_secs(1)).await.unwrap();
 
         // THEN
-        // loosely check that join_lobby() worked
-        // the details are guaranteed by join_lobby() tests
-        assert!(player_conn.creds.is_some());
-        assert!(player_conn.lobby.is_some());
+        // check that join_lobby() worked and we get the correct response
+        let login_response = serde_json::to_string(&PlayerResponse {
+            result: Ok(PlayerResponseValue::Login),
+        })
+        .unwrap();
+        assert_eq!(login_response, output.recv().await.unwrap());
+        // the other details are guaranteed by join_lobby() tests
     }
 
     #[tokio::test]
-    async fn GIVEN_non_login_request_WHEN_login_loop_THEN_error() {
+    async fn GIVEN_login_response_failure_WHEN_login_THEN_error() {
+        // GIVEN
+        let request = CreateLobbyRequest {
+            lobby_name: "lobby_name".to_string(),
+            lobby_password: "lobby_password".to_string(),
+            host_password: "host_password".to_string(),
+            config: JeopardyConfig::test_default(),
+        };
+        let state = new_test_server_state(Some(request.clone())).await;
+        // drop our receiving end to force the JsonConn to error out, simulating disconnect
+        let (mut player_conn, input_sender, _) = new_test_player_conn(state, false, 1);
+
+        // preconditions
+        input_sender
+            .send(PlayerRequest::Login(LoginCredentials {
+                lobby_id: request.lobby_name,
+                lobby_password: request.lobby_password,
+                username: "username".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // WHEN
+        let result = player_conn.login(1, Duration::from_secs(1)).await;
+
+        // THEN
+        assert_matches!(
+            result,
+            Err(PlayerHandlerError::Internal(InternalError::Dependency(..))) // json_ws should fail
+        );
+        // ensure that leave_lobby() was called
+        assert!(player_conn.lobby.is_none());
+        assert!(player_conn.creds.is_none());
+    }
+
+    #[tokio::test]
+    async fn GIVEN_non_login_request_WHEN_login_THEN_error() {
         // GIVEN
         let state = new_test_server_state(Some(CreateLobbyRequest {
             lobby_name: "lobby_name".to_string(),
@@ -1265,7 +1339,7 @@ mod player_conn_tests {
     }
 
     #[tokio::test]
-    async fn GIVEN_invalid_format_creds_WHEN_login_loop_THEN_error() {
+    async fn GIVEN_invalid_format_creds_WHEN_login_THEN_error() {
         // GIVEN
         let request = CreateLobbyRequest {
             lobby_name: "lobby_name".to_string(),
@@ -1319,7 +1393,7 @@ mod player_conn_tests {
     }
 
     #[tokio::test]
-    async fn GIVEN_max_attempts_WHEN_login_loop_THEN_error() {
+    async fn GIVEN_max_attempts_WHEN_login_THEN_error() {
         // GIVEN
         let request = CreateLobbyRequest {
             lobby_name: "lobby_name".to_string(),
@@ -1364,7 +1438,7 @@ mod player_conn_tests {
     }
 
     #[tokio::test]
-    async fn GIVEN_join_lobby_error_WHEN_login_loop_THEN_error() {
+    async fn GIVEN_join_lobby_error_WHEN_login_THEN_error() {
         // GIVEN
         let request = CreateLobbyRequest {
             lobby_name: "lobby_name".to_string(),
@@ -1419,7 +1493,9 @@ mod player_conn_tests {
         // ensure that the correct response was sent
         let response = output.recv().await.unwrap();
         let expected_response = serde_json::to_string(&PlayerResponse {
-            result: Ok(PlayerCommandResponse::GetWager(0)), // wager is always default 0
+            result: Ok(PlayerResponseValue::Command(
+                PlayerCommandResponse::GetWager(0),
+            )), // wager is always default 0
         })
         .unwrap();
         assert_eq!(expected_response, response);
@@ -1538,7 +1614,9 @@ mod player_conn_tests {
         // THEN
         let response = output.recv().await.unwrap(); // ensure that we receive the response from the lobby
         let expected_response = serde_json::to_string(&PlayerResponse {
-            result: Ok(PlayerCommandResponse::GetWager(0)), // wager is always default 0
+            result: Ok(PlayerResponseValue::Command(
+                PlayerCommandResponse::GetWager(0),
+            )), // wager is always default 0
         })
         .unwrap();
         assert_eq!(expected_response, response);
@@ -1584,7 +1662,9 @@ mod player_conn_tests {
         // ensure points update event is received
         let response = output.recv().await.unwrap();
         let expected_response = serde_json::to_string(&PlayerResponse {
-            result: Ok(PlayerCommandResponse::GetPoints(points)),
+            result: Ok(PlayerResponseValue::Command(
+                PlayerCommandResponse::GetPoints(points),
+            )),
         })
         .unwrap();
         assert_eq!(expected_response, response);
@@ -1592,8 +1672,11 @@ mod player_conn_tests {
         // ensure text card event is received
         let response = output.recv().await.unwrap();
         let expected_response = serde_json::to_string(&PlayerResponse {
-            result: Ok(PlayerCommandResponse::Refresh(
-                JeopardyDisplayState::Question(TextCard { title, content }),
+            result: Ok(PlayerResponseValue::Command(
+                PlayerCommandResponse::Refresh(JeopardyDisplayState::Question(TextCard {
+                    title,
+                    content,
+                })),
             )),
         })
         .unwrap();
