@@ -3,6 +3,7 @@ import { Login } from "./components/app/login/Login";
 import type { Board } from "./jeopardy-rs-sdk/generated/Board";
 import type { JeopardyPlayer } from "./jeopardy-rs-sdk/game/JeopardyPlayer";
 import './App.css'
+import { HostPanel } from "./components/app/host/HostPanel";
 
 const dummyBoard: Board = {
     categories: Array.from({ length: 6 }, (_, i: number) => ({
@@ -31,6 +32,7 @@ function App() {
             <header id="app-header">Jeopardy</header>
             <Login />
             <main id="app-main">
+                <HostPanel />
                 <PlayerPanel
                     display={{ board: dummyBoard }}
                     players={dummyPlayers}

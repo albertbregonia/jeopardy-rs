@@ -1,0 +1,29 @@
+.host-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-evenly;
+    font-family: var(--login-font);
+    text-align: center;
+    background-color: var(--accent-background-color);
+    max-width: max-content;
+    min-height: 100%;
+    padding: 0 2em;
+
+    /* left side panel */
+    position: fixed;
+    margin: auto;
+    top: 0;
+    bottom: 0;
+    left: 0;
+}
+
+.host-panel-form {
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+}
+
+.host-panel-form * {
+    margin: 0.25em 0;
+}
