@@ -3,7 +3,7 @@ use std::{error::Error, time::Duration};
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use stagecrew::{
-    conn::{ErrorReason, JsonConn, TextTransport},
+    conn::{ErrorReason, JsonConn, JsonConnError, TextTransport},
     lobby::{Lobby, LobbyError},
     manager::{ManagerEntry, ManagerError},
 };
@@ -76,6 +76,14 @@ pub enum PlayerRequest {
 pub enum PlayerResponseValue {
     Login,
     Command(PlayerCommandResponse),
+    #[cfg(test)]
+    #[serde(serialize_with = "serialize_into_test_error")]
+    TestInducedError,
+}
+
+#[cfg(test)]
+pub(crate) fn serialize_into_test_error<S: serde::Serializer>(_: S) -> Result<S::Ok, S::Error> {
+    Err(serde::ser::Error::custom("test induced error"))
 }
 
 // response type for player requests
@@ -97,7 +105,7 @@ pub struct PlayerResponse {
 //   meaning, a function does not return an error unless it believes it cannot/should not continue
 pub struct PlayerConn<T: TextTransport, M: ManagerGeneric, C: CredsValidatorGeneric> {
     state: JeopardyServerStateGeneric<M, C>,
-    json_ws: JsonConn<T, PlayerRequest, PlayerResponse>,
+    json_conn: JsonConn<T, PlayerRequest, PlayerResponse>,
     lobby: Option<Lobby<Jeopardy>>,
     creds: Option<LoginCredentials>,
 }
@@ -173,11 +181,11 @@ where
 {
     pub fn new(
         state: JeopardyServerStateGeneric<M, C>,
-        json_ws: JsonConn<T, PlayerRequest, PlayerResponse>,
+        json_conn: JsonConn<T, PlayerRequest, PlayerResponse>,
     ) -> Self {
         Self {
             state,
-            json_ws,
+            json_conn,
             lobby: None,
             creds: None, // cache lobby ID and username to refer to later
         }
@@ -185,15 +193,26 @@ where
 
     // helpers to send responses and errors to the player over the `JsonConn`
 
-    async fn send_response(&mut self, value: PlayerResponseValue) -> Result<(), InternalError> {
-        self.json_ws
+    async fn send_response(
+        &mut self,
+        value: PlayerResponseValue,
+    ) -> Result<(), PlayerHandlerError> {
+        self.json_conn
             .send_json(&PlayerResponse { result: Ok(value) })
             .await
-            .map_err(|e| InternalError::Dependency(anyhow!("Failed to send response: {e}")))
+            .map_err(|e| match e {
+                JsonConnError::Json(e) => PlayerHandlerError::Internal(InternalError::Dependency(
+                    anyhow!("JsonConn failed to serialize response: {e}"),
+                )),
+                JsonConnError::TextTransport(e) => {
+                    tracing::warn!("JsonConn dependency failed to send response: {e}");
+                    PlayerHandlerError::User(UserError::Disconnected)
+                }
+            })
     }
 
     async fn send_recoverable_user_error(&mut self, e: UserError) -> Result<(), InternalError> {
-        self.json_ws
+        self.json_conn
             .send_json(&e.into())
             .await
             .map_err(|e| InternalError::Dependency(anyhow!("Failed to send user error: {e}")))
@@ -201,7 +220,7 @@ where
 
     // NOTE: this function consumes the connection
     pub async fn handle_irrecoverable_user_error(self, e: UserError) -> Result<(), InternalError> {
-        self.json_ws
+        self.json_conn
             .disconnect(Some(ErrorReason {
                 internal_error: false,
                 reason: e.to_string(),
@@ -216,7 +235,7 @@ where
 
     // NOTE: this function consumes the connection
     pub async fn handle_internal_error(self, _e: InternalError) -> Result<(), InternalError> {
-        self.json_ws
+        self.json_conn
             .disconnect(Some(ErrorReason {
                 internal_error: true,
                 reason: "Internal Server Error".to_string(),
@@ -233,7 +252,7 @@ where
         &mut self,
         max_timeout: Duration,
     ) -> Result<PlayerRequest, PlayerHandlerError> {
-        let request = timeout(max_timeout, self.json_ws.read_json())
+        let request = timeout(max_timeout, self.json_conn.read_json())
             .await
             .map_err(|_| UserError::ActivityTimeout)?
             .ok_or(UserError::Disconnected)?
@@ -510,7 +529,7 @@ where
             // this may cascade into the lobby getting freed (when 0 players are in the lobby)
             let connected = timeout(activity_timeout, async {
                 tokio::select! {
-                    result = self.json_ws.read_json() => match result {
+                    result = self.json_conn.read_json() => match result {
                         Some(result) => match result {
                             Ok(request) => {
                                 let PlayerRequest::Command(cmd) = request else {
@@ -658,7 +677,28 @@ mod player_conn_tests {
             .await;
 
         // THEN
-        assert_matches!(result, Err(InternalError::Dependency(..)));
+        assert_matches!(
+            result,
+            Err(PlayerHandlerError::User(UserError::Disconnected))
+        );
+    }
+
+    #[tokio::test]
+    async fn GIVEN_serialization_error_WHEN_send_response_THEN_error() {
+        // GIVEN
+        let state = new_test_server_state(None).await;
+        let (mut player_conn, _, _output_receiver) = new_test_player_conn(state, false, 1);
+
+        // WHEN
+        let result = player_conn
+            .send_response(PlayerResponseValue::TestInducedError)
+            .await;
+
+        // THEN
+        assert_matches!(
+            result,
+            Err(PlayerHandlerError::Internal(InternalError::Dependency(..)))
+        );
     }
 
     // send_recoverable_user_error() tests
@@ -1298,7 +1338,7 @@ mod player_conn_tests {
         // THEN
         assert_matches!(
             result,
-            Err(PlayerHandlerError::Internal(InternalError::Dependency(..))) // json_ws should fail
+            Err(PlayerHandlerError::User(UserError::Disconnected)) // json_ws should fail
         );
         // ensure that leave_lobby() was called
         assert!(player_conn.lobby.is_none());

@@ -16,7 +16,7 @@ pub enum JsonConnError {
     // we don't care specifically how the underlying dependency broke
     // we just care that it broke and cannot fulfill our operation
     #[error(transparent)]
-    Dependency(#[from] Box<dyn Error + Send + Sync + 'static>),
+    TextTransport(#[from] Box<dyn Error + Send + Sync + 'static>),
 }
 
 pub struct JsonConn<T, I, O>
@@ -67,7 +67,7 @@ where
     pub async fn read_json(&mut self) -> Option<Result<I, JsonConnError>> {
         let raw_msg = match self.transport.read_text().await? {
             Ok(bin) => bin,
-            Err(e) => return Some(Err(JsonConnError::Dependency(e.into()))),
+            Err(e) => return Some(Err(JsonConnError::TextTransport(e.into()))),
         };
         let deserialized = match serde_json::from_slice(&raw_msg) {
             Ok(bin) => bin,
@@ -81,7 +81,7 @@ where
         self.transport
             .send_text(&serialized)
             .await
-            .map_err(|e| JsonConnError::Dependency(e.into()))
+            .map_err(|e| JsonConnError::TextTransport(e.into()))
     }
 
     pub async fn disconnect(self, reason: Option<ErrorReason>) -> Result<(), JsonConnError> {
@@ -90,7 +90,7 @@ where
         self.transport
             .disconnect(reason)
             .await
-            .map_err(|e| JsonConnError::Dependency(e.into()))?;
+            .map_err(|e| JsonConnError::TextTransport(e.into()))?;
         Ok(())
     }
 }
@@ -245,7 +245,7 @@ mod json_conn_tests {
         let result = mock_conn.read_json().await.unwrap();
 
         // THEN
-        assert!(matches!(result, Err(JsonConnError::Dependency(..))));
+        assert!(matches!(result, Err(JsonConnError::TextTransport(..))));
     }
 
     #[tokio::test]
@@ -291,7 +291,7 @@ mod json_conn_tests {
         let result = mock_conn.send_json(&TestType::VariantA).await;
 
         // THEN
-        assert!(matches!(result, Err(JsonConnError::Dependency(..))));
+        assert!(matches!(result, Err(JsonConnError::TextTransport(..))));
     }
 
     // disconnect() tests
@@ -319,6 +319,6 @@ mod json_conn_tests {
         let result = mock_conn.disconnect(None).await;
 
         // THEN
-        assert!(matches!(result, Err(JsonConnError::Dependency(..))));
+        assert!(matches!(result, Err(JsonConnError::TextTransport(..))));
     }
 }

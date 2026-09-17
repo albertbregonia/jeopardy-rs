@@ -159,7 +159,7 @@ async fn GIVEN_dropped_client_WHEN_read_json_THEN_error() {
         // THEN
         assert!(matches!(
             json_conn.read_json().await, // this should axum error bc the connection was dropped abruptly
-            Some(Err(JsonConnError::Dependency(..)))
+            Some(Err(JsonConnError::TextTransport(..)))
         ));
     })
     .await;
@@ -181,7 +181,7 @@ async fn GIVEN_ping_msg_WHEN_read_json_THEN_error() {
         // THEN
         assert!(matches!(
             json_conn.read_json().await, // ping is unsupported
-            Some(Err(JsonConnError::Dependency(..)))
+            Some(Err(JsonConnError::TextTransport(..)))
         ));
     })
     .await;
@@ -232,7 +232,7 @@ async fn GIVEN_closed_client_WHEN_send_json_THEN_error() {
         let _ = json_conn.read_json().await; // dummy read call to ensure that send doesn't occur before we drop
         assert!(matches!(
             json_conn.send_json(&TestType).await,
-            Err(JsonConnError::Dependency(..))
+            Err(JsonConnError::TextTransport(..))
         ));
     })
     .await;

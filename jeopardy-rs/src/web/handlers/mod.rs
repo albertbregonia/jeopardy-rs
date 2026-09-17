@@ -11,7 +11,7 @@ pub use create_lobby::create_lobby;
 pub use delete_lobby::delete_lobby;
 pub use host_command::handle_host_command;
 pub use join_lobby::join_lobby;
-use serde::Serialize;
+use serde::{Serialize, ser::SerializeMap};
 
 const RESULT_ERR_JSON_KEY: &str = "error";
 const RESULT_OK_JSON_KEY: &str = "value";
@@ -28,12 +28,13 @@ where
     // but outwardly, we don't want to have callers have to handle
     // "Err" and "Ok" Rust formats bc that's too low level.
     // therefore, make it standard JSON and use Option<> so we get nulls
+    // NOTE: serialization is done manually as opposed to using the macro serde_json::json!({..});
+    // because that requires the contents to be infallible
     let result = result.as_ref();
-    serde_json::json!({
-        RESULT_OK_JSON_KEY: result.ok(),
-        RESULT_ERR_JSON_KEY: result.err(),
-    })
-    .serialize(serializer)
+    let mut map = serializer.serialize_map(Some(2))?;
+    map.serialize_entry(RESULT_OK_JSON_KEY, &result.ok())?;
+    map.serialize_entry(RESULT_ERR_JSON_KEY, &result.err())?;
+    map.end()
 }
 
 #[cfg(test)]
