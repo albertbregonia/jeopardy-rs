@@ -11,10 +11,17 @@ pub use create_lobby::create_lobby;
 pub use delete_lobby::delete_lobby;
 pub use host_command::handle_host_command;
 pub use join_lobby::join_lobby;
-use serde::{Serialize, ser::SerializeMap};
+use serde::Serialize;
+use ts_rs::TS;
 
-const RESULT_ERR_JSON_KEY: &str = "error";
-const RESULT_OK_JSON_KEY: &str = "value";
+// as ts-rs cannot inspect serde custom serializations, we need an intermediary type
+// therefore, serialize_result(..) will simply serialize as this type
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct JsonResult<T> {
+    pub(crate) value: Option<T>,
+    pub(crate) error: Option<String>,
+}
 
 pub(crate) fn serialize_result<T, S>(
     result: &Result<T, String>,
@@ -28,20 +35,23 @@ where
     // but outwardly, we don't want to have callers have to handle
     // "Err" and "Ok" Rust formats bc that's too low level.
     // therefore, make it standard JSON and use Option<> so we get nulls
-    // NOTE: serialization is done manually as opposed to using the macro serde_json::json!({..});
-    // because that requires the contents to be infallible
     let result = result.as_ref();
-    let mut map = serializer.serialize_map(Some(2))?;
-    map.serialize_entry(RESULT_OK_JSON_KEY, &result.ok())?;
-    map.serialize_entry(RESULT_ERR_JSON_KEY, &result.err())?;
-    map.end()
+    JsonResult {
+        value: result.ok(),
+        error: result.err().cloned(),
+    }
+    .serialize(serializer)
 }
 
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod serialize_result_tests {
-    use crate::web::handlers::{RESULT_ERR_JSON_KEY, RESULT_OK_JSON_KEY, serialize_result};
+    use crate::web::handlers::serialize_result;
     use serde::Serialize;
+
+    // NOTE: needs to align with JsonResult<> fields, tests will fail otherwise
+    const RESULT_OK_JSON_KEY: &str = "value";
+    const RESULT_ERR_JSON_KEY: &str = "error";
 
     #[derive(Serialize)]
     struct ResultWrapper {

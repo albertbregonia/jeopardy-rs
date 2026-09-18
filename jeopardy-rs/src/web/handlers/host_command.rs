@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::{
     game::{JeopardyCommand, JeopardyCommandResponse, JeopardyError},
     server::{CredsValidatorGeneric, JeopardyServerStateGeneric, ManagerGeneric},
-    web::handlers::{serialize_result, validators::CredsValidator},
+    web::handlers::{JsonResult, serialize_result, validators::CredsValidator},
 };
 use stagecrew::manager::{ManagerEntry, ManagerError};
 
@@ -28,6 +28,7 @@ pub struct HostRequest {
 pub struct HostResponse {
     pub request_id: String,
     #[serde(serialize_with = "serialize_result")]
+    #[ts(as = "JsonResult<JeopardyCommandResponse>")]
     pub result: Result<JeopardyCommandResponse, String>, // command response or error msg
 }
 

@@ -22,7 +22,7 @@ use crate::{
         player::{JeopardyPlayer, JeopardyPlayerEvent},
     },
     server::{CredsValidatorGeneric, JeopardyServerStateGeneric, ManagerGeneric},
-    web::handlers::serialize_result,
+    web::handlers::{JsonResult, serialize_result},
 };
 
 /// Helper struct to encapsulate creds for a login request
@@ -76,7 +76,10 @@ pub enum PlayerRequest {
 pub enum PlayerResponseValue {
     Login,
     Command(PlayerCommandResponse),
+
+    // enum variant used to induce serialization errors during testing
     #[cfg(test)]
+    #[ts(skip)]
     #[serde(serialize_with = "serialize_into_test_error")]
     TestInducedError,
 }
@@ -93,8 +96,8 @@ pub(crate) fn serialize_into_test_error<S: serde::Serializer>(_: S) -> Result<S:
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct PlayerResponse {
-    // TODO: serialize_result is ignored with ts-rs
     #[serde(serialize_with = "serialize_result")]
+    #[ts(as = "JsonResult<PlayerResponseValue>")]
     pub result: Result<PlayerResponseValue, String>,
 }
 
